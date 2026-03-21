@@ -1,5 +1,6 @@
-import { internalMutation, internalQuery, mutation } from "./_generated/server";
+import { internalMutation, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireIdentity } from "./lib/auth";
 
 export const upsertUser = internalMutation({
   args: {
@@ -22,7 +23,9 @@ export const upsertUser = internalMutation({
       });
     } else {
       await ctx.db.insert("users", {
+        tokenIdentifier: args.clerkId,
         ...args,
+        fullName: [args.firstName, args.lastName].filter(Boolean).join(" ") || undefined,
         orgIds: [],
       });
     }
@@ -108,30 +111,32 @@ export const syncUser = mutation({
     orgIds: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      return;
-    }
+    const identity = await requireIdentity(ctx);
 
-    const { subject, name, email, pictureUrl } = identity;
+    const { subject, name, email, pictureUrl, tokenIdentifier } = identity;
 
     const user = await ctx.db
       .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", subject))
+      .withIndex("by_tokenIdentifier", (q) => q.eq("tokenIdentifier", tokenIdentifier))
       .first();
 
     if (user) {
       await ctx.db.patch(user._id, {
+        tokenIdentifier,
         firstName: name?.split(" ")[0] || "",
         lastName: name?.split(" ").slice(1).join(" ") || "",
+        fullName: name || "",
+        clerkId: subject,
         email: email || user.email,
         imageUrl: pictureUrl || "",
         orgIds: args.orgIds,
       });
     } else {
       await ctx.db.insert("users", {
+        tokenIdentifier,
         clerkId: subject,
         email: email || "",
+        fullName: name || "",
         firstName: name?.split(" ")[0] || "",
         lastName: name?.split(" ").slice(1).join(" ") || "",
         imageUrl: pictureUrl || "",

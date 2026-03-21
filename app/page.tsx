@@ -5,6 +5,9 @@ import { Features } from '@/components/home/features';
 import { Footer } from '@/components/home/footer';
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
+import { createMetadata } from '@/lib/metadata';
+
+export const metadata = createMetadata("Home", "AI-powered meeting operations with realtime collaboration, summaries, and workspace analytics.");
 
 export default async function HomePage() {
   const { userId } = await auth();

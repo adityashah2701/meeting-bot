@@ -1,14 +1,8 @@
-import React from 'react';
-import { DashboardHeader } from '@/components/dashboard/dashboard-header';
-import { DashboardStats } from '@/components/dashboard/dashboard-stats';
-import { RecentMeetings } from '@/components/dashboard/recent-meetings';
+import { DashboardPage } from "@/features/dashboard/components/dashboard-page";
+import { createMetadata } from "@/lib/metadata";
 
-export default function DashboardPage() {
-  return (
-    <div className="flex flex-col gap-10">
-      <DashboardHeader />
-      <DashboardStats />
-      <RecentMeetings />
-    </div>
-  );
+export const metadata = createMetadata("Dashboard", "Monitor live meetings, summaries, and action items in your workspace.");
+
+export default function DashboardRoute() {
+  return <DashboardPage />;
 }

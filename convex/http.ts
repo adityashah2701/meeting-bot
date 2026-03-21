@@ -5,6 +5,21 @@ import { internal } from "./_generated/api";
 
 const http = httpRouter();
 
+type ClerkWebhookEvent = {
+  type: string;
+  data: {
+    id: string;
+    email_addresses?: Array<{ email_address: string }>;
+    first_name?: string;
+    last_name?: string;
+    image_url?: string;
+    name?: string;
+    slug?: string;
+    public_user_data?: { user_id: string };
+    organization?: { id: string };
+  };
+};
+
 http.route({
   path: "/clerk",
   method: "POST",
@@ -32,7 +47,7 @@ http.route({
         "svix-id": svixId,
         "svix-timestamp": svixTimestamp,
         "svix-signature": svixSignature,
-      }) as any;
+      }) as ClerkWebhookEvent;
 
       const { id, ...attributes } = evt.data;
 
@@ -55,8 +70,8 @@ http.route({
         case "organization.updated":
           await ctx.runMutation(internal.users.upsertOrganization, {
             clerkId: id,
-            name: attributes.name,
-            slug: attributes.slug,
+            name: attributes.name ?? "Organization",
+            slug: attributes.slug ?? id,
             imageUrl: attributes.image_url,
           });
           break;
@@ -64,12 +79,18 @@ http.route({
           await ctx.runMutation(internal.users.deleteOrganization, { clerkId: id });
           break;
         case "organizationMembership.created":
+          if (!attributes.public_user_data?.user_id || !attributes.organization?.id) {
+            break;
+          }
           await ctx.runMutation(internal.users.addOrganizationMembership, {
             userClerkId: attributes.public_user_data.user_id,
             orgClerkId: attributes.organization.id,
           });
           break;
         case "organizationMembership.deleted":
+          if (!attributes.public_user_data?.user_id || !attributes.organization?.id) {
+            break;
+          }
           await ctx.runMutation(internal.users.removeOrganizationMembership, {
             userClerkId: attributes.public_user_data.user_id,
             orgClerkId: attributes.organization.id,
@@ -78,9 +99,10 @@ http.route({
       }
 
       return new Response(null, { status: 200 });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown webhook error";
       console.error("Webhook Error:", err);
-      return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+      return new Response(`Webhook Error: ${message}`, { status: 400 });
     }
   }),
 });

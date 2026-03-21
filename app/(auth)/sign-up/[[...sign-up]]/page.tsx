@@ -1,4 +1,7 @@
 import { SignUp } from "@clerk/nextjs";
+import { createMetadata } from "@/lib/metadata";
+
+export const metadata = createMetadata("Sign Up", "Create your Meeting Bot account and launch your workspace.");
 
 export default function SignUpPage() {
   return (

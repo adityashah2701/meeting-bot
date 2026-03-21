@@ -1,4 +1,7 @@
 import { SignIn } from "@clerk/nextjs";
+import { createMetadata } from "@/lib/metadata";
+
+export const metadata = createMetadata("Sign In", "Sign in to your Meeting Bot workspace.");
 
 export default function SignInPage() {
   return (

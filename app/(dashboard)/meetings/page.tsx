@@ -1,14 +1,8 @@
-import React from 'react';
-import { MeetingsHeader } from '@/components/meetings/meetings-header';
-import { MeetingsTable } from '@/components/meetings/meetings-table';
+import { MeetingsPage } from "@/features/meeting/components/meetings-page";
+import { createMetadata } from "@/lib/metadata";
 
-export default function MeetingsListPage() {
-  return (
-    <div className="flex flex-col h-full animate-in fade-in duration-500">
-      <MeetingsHeader />
-      <div className="flex-1 overflow-auto">
-        <MeetingsTable />
-      </div>
-    </div>
-  );
+export const metadata = createMetadata("Meetings", "Browse every scheduled, live, and completed meeting in your organization.");
+
+export default function MeetingsRoute() {
+  return <MeetingsPage />;
 }

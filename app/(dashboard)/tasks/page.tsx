@@ -1,12 +1,8 @@
-import React from 'react';
-import { TasksHeader } from '@/components/tasks/tasks-header';
-import { TasksList } from '@/components/tasks/tasks-list';
+import { TasksPage } from "@/features/tasks/components/tasks-page";
+import { createMetadata } from "@/lib/metadata";
 
-export default function TasksPage() {
-  return (
-    <div className="animate-in fade-in duration-500 max-w-5xl mx-auto w-full">
-      <TasksHeader />
-      <TasksList />
-    </div>
-  );
+export const metadata = createMetadata("Tasks", "Track meeting follow-ups and action items in realtime.");
+
+export default function TasksRoute() {
+  return <TasksPage />;
 }

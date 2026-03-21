@@ -1,0 +1,146 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useOrganization } from "@clerk/nextjs";
+import { useMutation } from "convex/react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  createInstantMeeting,
+  meetingService,
+  scheduleMeeting,
+} from "@/features/meeting/services/meeting-service";
+import { MeetingFormInstant } from "@/features/meeting/components/meeting-form-instant";
+import { MeetingFormSchedule } from "@/features/meeting/components/meeting-form-schedule";
+
+export function CreateMeetingDialog({
+  triggerLabel = "Start Meeting",
+  triggerVariant = "default",
+}: {
+  triggerLabel?: string;
+  triggerVariant?: "default" | "outline" | "secondary";
+}) {
+  const router = useRouter();
+  const { organization } = useOrganization();
+  const createMeeting = useMutation(meetingService.createMeeting);
+  const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("instant");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const requireOrganization = () => {
+    if (!organization?.id) {
+      toast.error("Select an organization first.");
+      return null;
+    }
+
+    return organization.id;
+  };
+
+  const handleInstantSubmit = async (values: { title: string }) => {
+    const orgId = requireOrganization();
+    if (!orgId) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const meetingId = await createInstantMeeting(createMeeting, {
+        orgId,
+        title: values.title,
+      });
+
+      setOpen(false);
+      toast.success("Meeting started");
+      router.push(`/meeting/${meetingId}`);
+    } catch {
+      toast.error("Unable to start meeting");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleScheduleSubmit = async (values: {
+    title: string;
+    description: string;
+    date: string;
+    time: string;
+    agenda: string;
+  }) => {
+    const orgId = requireOrganization();
+    if (!orgId) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const scheduledFor = new Date(`${values.date}T${values.time}`).getTime();
+
+      await scheduleMeeting(createMeeting, {
+        orgId,
+        title: values.title,
+        description: values.description,
+        agenda: values.agenda,
+        scheduledFor,
+      });
+
+      setOpen(false);
+      toast.success("Meeting scheduled");
+      router.refresh();
+    } catch {
+      toast.error("Unable to schedule meeting");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant={triggerVariant}>{triggerLabel}</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="text-xl">Create Meeting</DialogTitle>
+          <DialogDescription>
+            Start instantly or schedule for later.
+          </DialogDescription>
+        </DialogHeader>
+
+        <Tabs
+          className="gap-4"
+          value={activeTab}
+          onValueChange={setActiveTab}
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="instant">Instant</TabsTrigger>
+            <TabsTrigger value="schedule">Schedule</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="instant" className="space-y-4">
+            <MeetingFormInstant
+              isSubmitting={isSubmitting && activeTab === "instant"}
+              onSubmit={handleInstantSubmit}
+            />
+          </TabsContent>
+
+          <TabsContent value="schedule" className="space-y-4">
+            <MeetingFormSchedule
+              isSubmitting={isSubmitting && activeTab === "schedule"}
+              onSubmit={handleScheduleSubmit}
+            />
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  );
+}

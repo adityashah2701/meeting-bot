@@ -1,14 +1,8 @@
-import React from 'react';
-import { InsightsHeader } from '@/components/insights/insights-header';
-import { InsightsStats } from '@/components/insights/insights-stats';
-import { InsightsCharts } from '@/components/insights/insights-charts';
+import { InsightsPage } from "@/features/ai/components/insights-page";
+import { createMetadata } from "@/lib/metadata";
 
-export default function InsightsPage() {
-  return (
-    <div className="animate-in fade-in duration-500 max-w-7xl mx-auto w-full">
-      <InsightsHeader />
-      <InsightsStats />
-      <InsightsCharts />
-    </div>
-  );
+export const metadata = createMetadata("Insights", "Review meeting analytics and workspace activity trends.");
+
+export default function InsightsRoute() {
+  return <InsightsPage />;
 }

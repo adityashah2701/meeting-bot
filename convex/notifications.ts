@@ -1,16 +1,17 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireIdentity } from "./lib/auth";
 
 export const list = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return [];
+    const identity = await requireIdentity(ctx);
 
     return await ctx.db
       .query("notifications")
-      .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
-      .filter((q) => q.eq(q.field("orgId"), args.orgId))
+      .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+        q.eq("userTokenIdentifier", identity.tokenIdentifier).eq("orgId", args.orgId),
+      )
       .order("desc")
       .take(20);
   },
