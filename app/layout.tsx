@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 import { ClerkProvider } from "@clerk/nextjs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { dark } from "@clerk/ui/themes";
+import { Providers } from "@/components/providers";
+import { SyncUserWithConvex } from "@/components/sync-user-with-convex";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 const geistSans = Geist({
@@ -45,7 +47,12 @@ export default function RootLayout({
             inter.variable,
           )}
         >
-          <body className="min-h-full flex flex-col">{children}</body>
+          <body className="min-h-full flex flex-col">
+            <Providers>
+              <SyncUserWithConvex />
+              {children}
+            </Providers>
+          </body>
         </html>
       </TooltipProvider>
     </ClerkProvider>
