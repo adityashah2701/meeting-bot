@@ -48,6 +48,10 @@ function buildRtcConfig(): RTCConfiguration {
   };
 }
 
+function isPeerConnectionClosed(connection: RTCPeerConnection) {
+  return connection.signalingState === "closed" || connection.connectionState === "closed";
+}
+
 // ─── Early ICE candidate buffer ───────────────────────────────────────────────
 // ICE candidates can arrive via signaling before we have set the remote
 // description on the RTCPeerConnection. Applying them in that state throws.
@@ -314,12 +318,38 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     [],
   );
 
+  const shouldSkipPeerOperation = useCallback(
+    (
+      remoteParticipantId: string,
+      connection: RTCPeerConnection,
+      operation: string,
+    ) => {
+      const isCurrentConnection = peersRef.current[remoteParticipantId] === connection;
+      const isClosed = isPeerConnectionClosed(connection);
+
+      if (isCurrentConnection && !isClosed) {
+        return false;
+      }
+
+      console.debug(
+        `${LOG_TAG} Skipping ${operation} for peer=${remoteParticipantId} current=${isCurrentConnection} signalingState=${connection.signalingState} connectionState=${connection.connectionState}`,
+      );
+      return true;
+    },
+    [],
+  );
+
   const createPeerConnection = useCallback(async (
     remoteParticipantId: string,
     shouldCreateOffer: boolean,
   ) => {
-    if (peersRef.current[remoteParticipantId]) {
-      return peersRef.current[remoteParticipantId];
+    const existingConnection = peersRef.current[remoteParticipantId];
+    if (existingConnection) {
+      if (!isPeerConnectionClosed(existingConnection)) {
+        return existingConnection;
+      }
+
+      delete peersRef.current[remoteParticipantId];
     }
 
     console.debug(
@@ -457,8 +487,20 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       console.debug(
         `${LOG_TAG} Creating initial offer for peer=${remoteParticipantId}`,
       );
+      if (shouldSkipPeerOperation(remoteParticipantId, connection, "initial offer")) {
+        return connection;
+      }
+
       const offer = await connection.createOffer();
+      if (shouldSkipPeerOperation(remoteParticipantId, connection, "setLocalDescription(offer)")) {
+        return connection;
+      }
+
       await connection.setLocalDescription(offer);
+      if (shouldSkipPeerOperation(remoteParticipantId, connection, "send offer")) {
+        return connection;
+      }
+
       await sendSignal({
         meetingId,
         receiverParticipantId: remoteParticipantId as Id<"meeting_participants">,
@@ -468,7 +510,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     }
 
     return connection;
-  }, [meetingId, participantId, sendSignal]);
+  }, [meetingId, participantId, sendSignal, shouldSkipPeerOperation]);
 
   useEffect(() => {
     if (!participantId || !localStreamRef.current) {
@@ -518,6 +560,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           false,
         );
 
+        if (shouldSkipPeerOperation(signal.senderParticipantId, connection, `signal ${signal.kind}`)) {
+          return;
+        }
+
         if (signal.kind === "offer" && payload.sdp) {
           console.debug(
             `${LOG_TAG} Received OFFER from peer=${signal.senderParticipantId} signalingState=${connection.signalingState}`,
@@ -545,7 +591,27 @@ export function useWebrtc(meetingId: Id<"meetings">) {
             console.debug(
               `${LOG_TAG} Polite peer rolling back for peer=${signal.senderParticipantId}`,
             );
+            if (
+              shouldSkipPeerOperation(
+                signal.senderParticipantId,
+                connection,
+                "setLocalDescription(rollback)",
+              )
+            ) {
+              return;
+            }
+
             await connection.setLocalDescription({ type: "rollback" });
+          }
+
+          if (
+            shouldSkipPeerOperation(
+              signal.senderParticipantId,
+              connection,
+              "setRemoteDescription(offer)",
+            )
+          ) {
+            return;
           }
 
           await connection.setRemoteDescription(
@@ -558,7 +624,21 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           // Guard: only create and set the answer if we're still in the
           // correct signaling state (have-remote-offer).
           if (connection.signalingState === "have-remote-offer") {
+            if (shouldSkipPeerOperation(signal.senderParticipantId, connection, "createAnswer")) {
+              return;
+            }
+
             const answer = await connection.createAnswer();
+            if (
+              shouldSkipPeerOperation(
+                signal.senderParticipantId,
+                connection,
+                "setLocalDescription(answer)",
+              )
+            ) {
+              return;
+            }
+
             await connection.setLocalDescription(answer);
             console.debug(
               `${LOG_TAG} Sending ANSWER to peer=${signal.senderParticipantId}`,
@@ -583,6 +663,16 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
           // Only apply answer if we're in the right signaling state
           if (connection.signalingState === "have-local-offer") {
+            if (
+              shouldSkipPeerOperation(
+                signal.senderParticipantId,
+                connection,
+                "setRemoteDescription(answer)",
+              )
+            ) {
+              return;
+            }
+
             await connection.setRemoteDescription(
               new RTCSessionDescription(payload.sdp),
             );
@@ -598,9 +688,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         }
 
         if (signal.kind === "ice-candidate") {
-          // CRITICAL FIX: Buffer ICE candidates if remote description
-          // hasn't been set yet. This prevents the common "Cannot add
-          // ICE candidate when there is no remote SDP" error.
+
+          // Buffer ICE candidates if remote description hasn't been set yet.
+          // This prevents the common "Cannot add ICE candidate when there is
+          // no remote SDP" error.
           const hasRemoteDescription = connection.remoteDescription !== null;
 
           if (payload.candidate) {
@@ -663,7 +754,16 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       .catch((err) => {
         console.error(`${LOG_TAG} Signal processing error:`, err);
       });
-  }, [clearSignals, createPeerConnection, drainEarlyIceCandidates, meetingId, participantId, sendSignal, signals]);
+  }, [
+    clearSignals,
+    createPeerConnection,
+    drainEarlyIceCandidates,
+    meetingId,
+    participantId,
+    sendSignal,
+    shouldSkipPeerOperation,
+    signals,
+  ]);
 
   const toggleAudio = async () => {
     // Audio uses enabled-flag toggling intentionally: we need to keep the
