@@ -12,6 +12,8 @@ import {
   stopAllVideoTracks,
 } from "@/features/webrtc/services/camera-track-manager";
 
+const LOG_TAG = "[WebRTC]";
+
 type SignalPayload = {
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
@@ -45,6 +47,12 @@ function buildRtcConfig(): RTCConfiguration {
     iceCandidatePoolSize: 10,
   };
 }
+
+// ─── Early ICE candidate buffer ───────────────────────────────────────────────
+// ICE candidates can arrive via signaling before we have set the remote
+// description on the RTCPeerConnection. Applying them in that state throws.
+// We buffer them per-peer and drain after setRemoteDescription succeeds.
+type EarlyIceBuffer = Record<string, RTCIceCandidateInit[]>;
 
 export function useWebrtc(meetingId: Id<"meetings">) {
   const joinMeeting = useMutation(meetingService.joinMeeting);
@@ -80,6 +88,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const presentationStreamRef = useRef<MediaStream | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  // Buffer for ICE candidates that arrived before setRemoteDescription.
+  const earlyIceBufferRef = useRef<EarlyIceBuffer>({});
   // Debounce rapid camera toggling. Each toggle call stores a fresh symbol;
   // async continuations check whether their token is still current before
   // applying side-effects, discarding stale calls.
@@ -142,6 +152,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           return;
         }
 
+        console.debug(
+          `${LOG_TAG} Flushing ${candidates.length} ICE candidates to peer=${remoteParticipantId}`,
+        );
+
         void sendSignal({
           meetingId,
           receiverParticipantId: remoteParticipantId as Id<"meeting_participants">,
@@ -196,6 +210,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           video: false,
           audio: true,
         });
+
+        console.debug(
+          `${LOG_TAG} Audio stream acquired — id=${audioStream.id} tracks=${audioStream.getTracks().length}`,
+        );
 
         setPermissionDenied(false);
         localStreamRef.current = audioStream;
@@ -271,8 +289,30 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     });
   };
 
-  // replaceOutgoingVideoTrack is now delegated to the camera-track-manager
-  // service for consistency and testability.
+  // ─── Helper: drain early ICE buffer after remote description is set ───
+  const drainEarlyIceCandidates = useCallback(
+    async (connection: RTCPeerConnection, remoteParticipantId: string) => {
+      const buffered = earlyIceBufferRef.current[remoteParticipantId];
+      if (!buffered || buffered.length === 0) return;
+
+      console.debug(
+        `${LOG_TAG} Draining ${buffered.length} early ICE candidates for peer=${remoteParticipantId}`,
+      );
+      delete earlyIceBufferRef.current[remoteParticipantId];
+
+      for (const candidate of buffered) {
+        try {
+          await connection.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.warn(
+            `${LOG_TAG} Failed to add buffered ICE candidate for peer=${remoteParticipantId}:`,
+            err,
+          );
+        }
+      }
+    },
+    [],
+  );
 
   const createPeerConnection = useCallback(async (
     remoteParticipantId: string,
@@ -282,36 +322,86 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       return peersRef.current[remoteParticipantId];
     }
 
+    console.debug(
+      `${LOG_TAG} Creating peer connection for peer=${remoteParticipantId} shouldCreateOffer=${shouldCreateOffer}`,
+    );
+
     const connection = new RTCPeerConnection(buildRtcConfig());
     peersRef.current[remoteParticipantId] = connection;
 
-    // Add audio tracks from the audio-only stream.
+    // ── Add audio tracks from the audio-only stream ─────────────────────
     localStreamRef.current?.getAudioTracks().forEach((track) => {
+      console.debug(
+        `${LOG_TAG} Adding audio track id=${track.id} to peer=${remoteParticipantId}`,
+      );
       connection.addTrack(track, localStreamRef.current as MediaStream);
     });
 
-    // If the camera is currently on, add its video track too.
-    // This handles the case where a new peer joins after the local user has
-    // already enabled their camera.
-    if (cameraStreamRef.current) {
-      const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
-      if (videoTrack && videoTrack.readyState === "live") {
-        connection.addTrack(videoTrack, cameraStreamRef.current);
-      }
+    // ── CRITICAL FIX: Always add a video transceiver ────────────────────
+    // Camera starts OFF, so there is no video track to addTrack() with.
+    // Without a transceiver, there is no video m-line in the SDP, meaning:
+    //   1. replaceTrack() later has no sender to target
+    //   2. The remote peer never gets a video track in ontrack
+    //
+    // We use addTransceiver("video", { direction: "sendrecv" }) to ensure
+    // a video m-line is always present. When the camera turns on, we use
+    // replaceTrack() on this sender — no renegotiation needed.
+    //
+    // If the camera IS already on, we set the track on the transceiver's
+    // sender immediately so the remote peer gets video right away.
+    const currentVideoTrack = cameraStreamRef.current?.getVideoTracks()[0];
+    const transceiver = connection.addTransceiver("video", {
+      direction: "sendrecv",
+      streams: currentVideoTrack && cameraStreamRef.current
+        ? [cameraStreamRef.current]
+        : undefined,
+    });
+
+    if (currentVideoTrack && currentVideoTrack.readyState === "live") {
+      console.debug(
+        `${LOG_TAG} Setting existing video track on transceiver for peer=${remoteParticipantId}`,
+      );
+      await transceiver.sender.replaceTrack(currentVideoTrack);
     }
 
+    // ── ontrack: Receive remote streams ─────────────────────────────────
     connection.ontrack = (event) => {
-      const stream = event.streams[0];
-      if (!stream) {
-        return;
-      }
+      console.debug(
+        `${LOG_TAG} ontrack fired — peer=${remoteParticipantId} kind=${event.track.kind} track.id=${event.track.id} streams=${event.streams.length}`,
+      );
+
+      // CRITICAL FIX: Some browsers (especially with transceivers) fire
+      // ontrack without any streams. In that case, we create a synthetic
+      // MediaStream from the track so the video element has something to
+      // bind to.
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
 
       setRemoteStreams((current) => ({
         ...current,
         [remoteParticipantId]: stream,
       }));
+
+      // If the remote track ends (e.g. peer leaves or stops sharing),
+      // update the stream state so the UI reflects it.
+      event.track.onended = () => {
+        console.debug(
+          `${LOG_TAG} Remote track ended — peer=${remoteParticipantId} kind=${event.track.kind}`,
+        );
+      };
+
+      // When tracks are added/removed from the stream (e.g. renegotiation),
+      // force a state update so React re-renders with the latest stream.
+      const forceStreamUpdate = () => {
+        setRemoteStreams((current) => ({
+          ...current,
+          [remoteParticipantId]: stream,
+        }));
+      };
+      stream.onaddtrack = forceStreamUpdate;
+      stream.onremovetrack = forceStreamUpdate;
     };
 
+    // ── ICE candidate gathering ─────────────────────────────────────────
     connection.onicecandidate = (event) => {
       if (!event.candidate || !participantId) {
         return;
@@ -325,18 +415,78 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       );
     };
 
+    // ── Connection state monitoring ─────────────────────────────────────
     connection.onconnectionstatechange = () => {
-      if (connection.connectionState === "failed") {
-        void connection.restartIce();
+      const state = connection.connectionState;
+      console.debug(
+        `${LOG_TAG} Connection state changed — peer=${remoteParticipantId} state=${state}`,
+      );
+
+      if (state === "failed") {
+        console.warn(
+          `${LOG_TAG} Connection FAILED for peer=${remoteParticipantId} — restarting ICE`,
+        );
+        connection.restartIce();
         toast.error("Connection issue detected, retrying media path");
-        delete peersRef.current[remoteParticipantId];
       }
-      if (connection.connectionState === "disconnected") {
+      if (state === "disconnected") {
         toast.message("Participant connection lost. Attempting recovery…");
       }
     };
 
+    connection.oniceconnectionstatechange = () => {
+      console.debug(
+        `${LOG_TAG} ICE connection state — peer=${remoteParticipantId} state=${connection.iceConnectionState}`,
+      );
+    };
+
+    connection.onsignalingstatechange = () => {
+      console.debug(
+        `${LOG_TAG} Signaling state — peer=${remoteParticipantId} state=${connection.signalingState}`,
+      );
+    };
+
+    // ── negotiationneeded: auto-renegotiate when tracks change ──────────
+    connection.onnegotiationneeded = async () => {
+      // Only the offerer (deterministic by ID comparison) should send offers
+      // to avoid glare (simultaneous offers from both sides).
+      if (!participantId || participantId <= remoteParticipantId) {
+        return;
+      }
+
+      console.debug(
+        `${LOG_TAG} negotiationneeded — creating new offer for peer=${remoteParticipantId}`,
+      );
+
+      try {
+        const offer = await connection.createOffer();
+        // Check we haven't moved past stable (e.g. remote offer arrived first)
+        if (connection.signalingState !== "stable") {
+          console.debug(
+            `${LOG_TAG} Skipping renegotiation — signaling state is ${connection.signalingState}`,
+          );
+          return;
+        }
+        await connection.setLocalDescription(offer);
+        await sendSignal({
+          meetingId,
+          receiverParticipantId: remoteParticipantId as Id<"meeting_participants">,
+          kind: "offer",
+          payload: JSON.stringify({ sdp: offer }),
+        });
+      } catch (err) {
+        console.warn(
+          `${LOG_TAG} Auto-renegotiation failed for peer=${remoteParticipantId}:`,
+          err,
+        );
+      }
+    };
+
+    // ── Create offer if we are the deterministic offerer ─────────────────
     if (shouldCreateOffer) {
+      console.debug(
+        `${LOG_TAG} Creating initial offer for peer=${remoteParticipantId}`,
+      );
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
       await sendSignal({
@@ -366,6 +516,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       if (!activeParticipantIds.has(peerId as Id<"meeting_participants">)) {
         peersRef.current[peerId]?.close();
         delete peersRef.current[peerId];
+        // Clean up early ICE buffer for departed peers.
+        delete earlyIceBufferRef.current[peerId];
         setRemoteStreams((current) => {
           const next = { ...current };
           delete next[peerId];
@@ -397,11 +549,32 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         );
 
         if (signal.kind === "offer" && payload.sdp) {
+          console.debug(
+            `${LOG_TAG} Received OFFER from peer=${signal.senderParticipantId}`,
+          );
+
+          // Handle glare: if we're already in "have-local-offer" state,
+          // we need to rollback before accepting the remote offer.
+          if (connection.signalingState === "have-local-offer") {
+            console.debug(
+              `${LOG_TAG} Glare detected — rolling back local offer for peer=${signal.senderParticipantId}`,
+            );
+            await connection.setLocalDescription({ type: "rollback" });
+          }
+
           await connection.setRemoteDescription(
             new RTCSessionDescription(payload.sdp),
           );
+
+          // CRITICAL FIX: Drain any ICE candidates that arrived before
+          // the remote description was set.
+          await drainEarlyIceCandidates(connection, signal.senderParticipantId);
+
           const answer = await connection.createAnswer();
           await connection.setLocalDescription(answer);
+          console.debug(
+            `${LOG_TAG} Sending ANSWER to peer=${signal.senderParticipantId}`,
+          );
           await sendSignal({
             meetingId,
             receiverParticipantId: signal.senderParticipantId,
@@ -411,20 +584,80 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         }
 
         if (signal.kind === "answer" && payload.sdp) {
-          await connection.setRemoteDescription(
-            new RTCSessionDescription(payload.sdp),
+          console.debug(
+            `${LOG_TAG} Received ANSWER from peer=${signal.senderParticipantId}`,
           );
+
+          // Only apply answer if we're in the right signaling state
+          if (connection.signalingState === "have-local-offer") {
+            await connection.setRemoteDescription(
+              new RTCSessionDescription(payload.sdp),
+            );
+
+            // CRITICAL FIX: Drain any ICE candidates that arrived before
+            // the remote description was set.
+            await drainEarlyIceCandidates(connection, signal.senderParticipantId);
+          } else {
+            console.warn(
+              `${LOG_TAG} Ignoring answer — signalingState=${connection.signalingState} for peer=${signal.senderParticipantId}`,
+            );
+          }
         }
 
-        if (signal.kind === "ice-candidate" && payload.candidate) {
-          await connection.addIceCandidate(
-            new RTCIceCandidate(payload.candidate),
-          );
-        }
+        if (signal.kind === "ice-candidate") {
+          // CRITICAL FIX: Buffer ICE candidates if remote description
+          // hasn't been set yet. This prevents the common "Cannot add
+          // ICE candidate when there is no remote SDP" error.
+          const hasRemoteDescription = connection.remoteDescription !== null;
 
-        if (signal.kind === "ice-candidate" && Array.isArray(payload.candidates)) {
-          for (const candidate of payload.candidates) {
-            await connection.addIceCandidate(new RTCIceCandidate(candidate));
+          if (payload.candidate) {
+            if (hasRemoteDescription) {
+              try {
+                await connection.addIceCandidate(
+                  new RTCIceCandidate(payload.candidate),
+                );
+              } catch (err) {
+                console.warn(
+                  `${LOG_TAG} Failed to add ICE candidate for peer=${signal.senderParticipantId}:`,
+                  err,
+                );
+              }
+            } else {
+              console.debug(
+                `${LOG_TAG} Buffering early ICE candidate for peer=${signal.senderParticipantId}`,
+              );
+              if (!earlyIceBufferRef.current[signal.senderParticipantId]) {
+                earlyIceBufferRef.current[signal.senderParticipantId] = [];
+              }
+              earlyIceBufferRef.current[signal.senderParticipantId].push(
+                payload.candidate,
+              );
+            }
+          }
+
+          if (Array.isArray(payload.candidates)) {
+            for (const candidate of payload.candidates) {
+              if (hasRemoteDescription) {
+                try {
+                  await connection.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (err) {
+                  console.warn(
+                    `${LOG_TAG} Failed to add batched ICE candidate for peer=${signal.senderParticipantId}:`,
+                    err,
+                  );
+                }
+              } else {
+                console.debug(
+                  `${LOG_TAG} Buffering early batched ICE candidate for peer=${signal.senderParticipantId}`,
+                );
+                if (!earlyIceBufferRef.current[signal.senderParticipantId]) {
+                  earlyIceBufferRef.current[signal.senderParticipantId] = [];
+                }
+                earlyIceBufferRef.current[signal.senderParticipantId].push(
+                  candidate,
+                );
+              }
+            }
           }
         }
       }),
@@ -434,8 +667,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           signalIds: pendingSignals.map((signal) => signal._id),
         }).catch(() => undefined),
       )
-      .catch(() => undefined);
-  }, [clearSignals, createPeerConnection, meetingId, sendSignal, signals]);
+      .catch((err) => {
+        console.error(`${LOG_TAG} Signal processing error:`, err);
+      });
+  }, [clearSignals, createPeerConnection, drainEarlyIceCandidates, meetingId, sendSignal, signals]);
 
   const toggleAudio = async () => {
     // Audio uses enabled-flag toggling intentionally: we need to keep the
@@ -519,9 +754,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
       // Replace the outgoing video track on every peer connection.
       // replaceTrack avoids a full SDP renegotiation in Chrome, Edge, and
-      // Safari 15+. For peers that have no video sender yet (joined before
-      // this user's camera was ever on), the sender was already added in
-      // createPeerConnection, so replaceTrack will find it.
+      // Safari 15+. The transceiver was pre-created in createPeerConnection,
+      // so the sender will always be found.
       await replaceOutgoingVideoTrack(peersRef.current, videoTrack);
 
       setIsVideoOff(false);
@@ -540,8 +774,13 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         return;
       }
 
+      console.debug(
+        `${LOG_TAG} Screen share started — track id=${screenTrack.id}`,
+      );
+
       screenTrackRef.current = screenTrack;
       screenTrack.onended = () => {
+        console.debug(`${LOG_TAG} Screen share track ended by user/OS`);
         void stopScreenShare();
       };
 
@@ -557,6 +796,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const stopScreenShare = async () => {
     screenTrackRef.current?.stop();
     screenTrackRef.current = null;
+
+    console.debug(`${LOG_TAG} Screen share stopped — restoring camera track`);
 
     // After stopping the screen share, restore the camera track if one is
     // active. If the camera was off when the screen share started, we restore

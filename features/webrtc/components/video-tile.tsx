@@ -44,8 +44,37 @@ export function VideoTile({
     .join("");
 
   useEffect(() => {
-    if (!videoRef.current) return;
-    videoRef.current.srcObject = stream;
+    const el = videoRef.current;
+    if (!el) return;
+
+    el.srcObject = stream;
+
+    if (!stream) return;
+
+    // Autoplay policy can block play() even with the autoplay attribute.
+    // We call play() explicitly and retry muted if the browser blocks it.
+    const attemptPlay = () => {
+      el.play().catch(() => {
+        // Autoplay was blocked — retry muted (browsers always allow muted autoplay).
+        if (!el.muted) {
+          el.muted = true;
+          el.play().catch(() => undefined);
+        }
+      });
+    };
+
+    attemptPlay();
+
+    // When tracks are added/removed from the stream (renegotiation), the
+    // video element may need to restart playback.
+    const onTrackChange = () => attemptPlay();
+    stream.addEventListener("addtrack", onTrackChange);
+    stream.addEventListener("removetrack", onTrackChange);
+
+    return () => {
+      stream.removeEventListener("addtrack", onTrackChange);
+      stream.removeEventListener("removetrack", onTrackChange);
+    };
   }, [stream]);
 
   return (
