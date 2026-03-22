@@ -10,10 +10,22 @@ export default defineSchema({
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    // orgIds is kept for backwards compatibility but should NOT be used for
+    // indexed queries — use user_org_memberships instead.
     orgIds: v.array(v.string()),
   })
     .index("by_tokenIdentifier", ["tokenIdentifier"])
     .index("by_clerkId", ["clerkId"]),
+
+  // Explicit join table replacing the orgIds array-field scan.
+  // Convex cannot index array fields for membership queries, so we maintain
+  // a separate row per (user, org) pair with a composite index.
+  user_org_memberships: defineTable({
+    userTokenIdentifier: v.string(),
+    orgId: v.string(),
+  })
+    .index("by_orgId", ["orgId"])
+    .index("by_userTokenIdentifier_and_orgId", ["userTokenIdentifier", "orgId"]),
 
   organizations: defineTable({
     clerkId: v.string(),

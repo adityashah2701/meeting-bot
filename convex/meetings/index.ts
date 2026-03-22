@@ -41,12 +41,14 @@ export const create = mutation({
       lastActivityAt: now,
     });
 
-    const users = await ctx.db.query("users").take(200);
-    const orgMembers = users.filter((user) => user.orgIds.includes(args.orgId));
+    const memberships = await ctx.db
+      .query("user_org_memberships")
+      .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
+      .collect();
 
-    for (const user of orgMembers) {
+    for (const membership of memberships) {
       await ctx.db.insert("notifications", {
-        userTokenIdentifier: user.tokenIdentifier,
+        userTokenIdentifier: membership.userTokenIdentifier,
         orgId: args.orgId,
         message: isScheduled
           ? `New meeting scheduled: ${args.title}`

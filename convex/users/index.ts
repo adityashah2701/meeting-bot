@@ -131,6 +131,20 @@ export const addOrganizationMembership = internalMutation({
       await ctx.db.patch(user._id, {
         orgIds: [...user.orgIds, args.orgClerkId],
       });
+      
+      const existingMembership = await ctx.db
+        .query("user_org_memberships")
+        .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+          q.eq("userTokenIdentifier", user.tokenIdentifier).eq("orgId", args.orgClerkId),
+        )
+        .unique();
+        
+      if (!existingMembership) {
+        await ctx.db.insert("user_org_memberships", {
+          userTokenIdentifier: user.tokenIdentifier,
+          orgId: args.orgClerkId,
+        });
+      }
     }
   },
 });
@@ -149,6 +163,17 @@ export const removeOrganizationMembership = internalMutation({
       await ctx.db.patch(user._id, {
         orgIds: user.orgIds.filter((id) => id !== args.orgClerkId),
       });
+
+      const existingMembership = await ctx.db
+        .query("user_org_memberships")
+        .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+          q.eq("userTokenIdentifier", user.tokenIdentifier).eq("orgId", args.orgClerkId),
+        )
+        .unique();
+
+      if (existingMembership) {
+        await ctx.db.delete(existingMembership._id);
+      }
     }
   },
 });
@@ -187,10 +212,59 @@ export const syncUser = mutation({
     }
 
     if (user) {
+      const isUpgradingToken = user.tokenIdentifier !== tokenIdentifier;
+
       // Update and correct the tokenIdentifier to the full Clerk value
       await ctx.db.patch(user._id, updates);
+
+      if (isUpgradingToken) {
+        // Upgrade all user_org_memberships rows that use the old clerkId
+        const oldMemberships = await ctx.db
+          .query("user_org_memberships")
+          .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+            q.eq("userTokenIdentifier", user!.tokenIdentifier), // user.tokenIdentifier was the old one
+          )
+          .collect();
+
+        for (const membership of oldMemberships) {
+          await ctx.db.patch(membership._id, {
+            userTokenIdentifier: tokenIdentifier,
+          });
+        }
+
+        // Upgrade all notifications
+        const oldNotifications = await ctx.db
+          .query("notifications")
+          .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+            q.eq("userTokenIdentifier", user!.tokenIdentifier),
+          )
+          .collect();
+
+        for (const notification of oldNotifications) {
+          await ctx.db.patch(notification._id, {
+            userTokenIdentifier: tokenIdentifier,
+          });
+        }
+      }
     } else {
       await ctx.db.insert("users", updates);
+    }
+
+    // Sync user_org_memberships join table
+    for (const orgId of args.orgIds) {
+      const existing = await ctx.db
+        .query("user_org_memberships")
+        .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+          q.eq("userTokenIdentifier", tokenIdentifier).eq("orgId", orgId),
+        )
+        .unique();
+
+      if (!existing) {
+        await ctx.db.insert("user_org_memberships", {
+          userTokenIdentifier: tokenIdentifier,
+          orgId,
+        });
+      }
     }
   },
 });
