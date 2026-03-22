@@ -7,8 +7,10 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { meetingService } from "@/features/meeting/services/meeting-service";
 import {
   acquireCameraStream,
+  createPlaceholderVideoStream,
   createToggleToken,
   type OutgoingVideoSource,
+  type StableVideoSource,
   replaceOutgoingVideoTrack,
   stopAllVideoTracks,
 } from "@/features/webrtc/services/camera-track-manager";
@@ -73,9 +75,9 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
   const [participantId, setParticipantId] = useState<Id<"meeting_participants"> | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  // cameraStream is the reactive state version of cameraStreamRef, used by
-  // the local VideoTile to display the camera feed. localStream is audio-only
-  // and is used by the transcription hook.
+  // cameraStream is the reactive state version of cameraStreamRef. It stays
+  // persistent after first acquisition so camera senders keep a stable track/
+  // stream association even when the user toggles the camera off.
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [presentationStream, setPresentationStream] = useState<MediaStream | null>(null);
   const [remoteCameraStreams, setRemoteCameraStreams] = useState<RemoteMediaStreams>({});
@@ -91,13 +93,17 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   // It is separate from cameraStreamRef so that toggling the camera does
   // not interrupt microphone capture or require re-negotiation of audio.
   const localStreamRef = useRef<MediaStream | null>(null);
-  // cameraStreamRef holds the camera-only stream currently active.
-  // It is null when the camera is off, meaning no hardware lock is held.
+  // cameraStreamRef holds the persistent camera-only stream.
+  // Once acquired, it is reused so sender/stream associations stay stable.
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraPlaceholderRef = useRef<StableVideoSource | null>(null);
+  const presentationPlaceholderRef = useRef<StableVideoSource | null>(null);
   const remoteCameraStreamsRef = useRef<RemoteMediaStreams>({});
   const remotePresentationStreamsRef = useRef<RemoteMediaStreams>({});
   const presentationStreamRef = useRef<MediaStream | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const screenShareTokenRef = useRef<symbol | null>(null);
+  const stoppingScreenShareRef = useRef(false);
   const activeRemoteParticipantIdsRef = useRef<Set<string>>(new Set());
   const recoveringPeerIdsRef = useRef<Set<string>>(new Set());
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
@@ -279,6 +285,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     const sharedPresentationRef = presentationStreamRef;
     const activeLocalStreamRef = localStreamRef; // audio-only stream
     const activeCameraStreamRef = cameraStreamRef; // camera stream (may be null)
+    const activeCameraPlaceholderRef = cameraPlaceholderRef;
+    const activePresentationPlaceholderRef = presentationPlaceholderRef;
 
     return () => {
       // Close all peer connections first so they stop requesting frames.
@@ -295,6 +303,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       // turns the camera LED off if the user leaves while the camera is on.
       stopAllVideoTracks(activeCameraStreamRef.current);
       activeCameraStreamRef.current = null;
+      activeCameraPlaceholderRef.current?.track.stop();
+      activePresentationPlaceholderRef.current?.track.stop();
 
       leaveMeeting({ meetingId }).catch(() => undefined);
     };
@@ -312,6 +322,38 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       isScreenSharing: nextState?.screen ?? isScreenSharing,
     });
   };
+
+  const getOrCreatePlaceholderSource = useCallback((source: OutgoingVideoSource) => {
+    const ref = source === CAMERA_SOURCE ? cameraPlaceholderRef : presentationPlaceholderRef;
+    if (!ref.current) {
+      ref.current = createPlaceholderVideoStream(source);
+    }
+
+    return ref.current;
+  }, []);
+
+  const ensureCameraStream = useCallback(async () => {
+    const existingStream = cameraStreamRef.current;
+    const existingTrack = existingStream?.getVideoTracks()[0];
+
+    if (existingStream && existingTrack && existingTrack.readyState === "live") {
+      return { stream: existingStream, videoTrack: existingTrack };
+    }
+
+    if (existingStream) {
+      stopAllVideoTracks(existingStream);
+      cameraStreamRef.current = null;
+    }
+
+    const result = await acquireCameraStream();
+    if (!result) {
+      return null;
+    }
+
+    cameraStreamRef.current = result.stream;
+    setCameraStream(result.stream);
+    return result;
+  }, []);
 
   // ─── Helper: drain early ICE buffer after remote description is set ───
   const drainEarlyIceCandidates = useCallback(
@@ -427,33 +469,75 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     const connection = new RTCPeerConnection(buildRtcConfig());
     peersRef.current[remoteParticipantId] = connection;
 
-    const setRemoteStreamForSource = (
+    const syncRemoteTrackForSource = (
       source: OutgoingVideoSource,
-      stream: MediaStream | null,
+      track: MediaStreamTrack,
+      streamHint?: MediaStream,
     ) => {
       const setStreams = source === CAMERA_SOURCE
         ? setRemoteCameraStreams
         : setRemotePresentationStreams;
 
       setStreams((current) => {
-        if (!stream) {
-          if (!(remoteParticipantId in current)) {
-            return current;
-          }
+        const existingStream = current[remoteParticipantId];
+        const nextStream = existingStream ?? new MediaStream();
+        let changed = !existingStream;
 
-          const next = { ...current };
-          delete next[remoteParticipantId];
-          return next;
+        streamHint?.getTracks().forEach((hintTrack) => {
+          if (!nextStream.getTracks().some((existingTrack) => existingTrack.id === hintTrack.id)) {
+            nextStream.addTrack(hintTrack);
+            changed = true;
+          }
+        });
+
+        if (!nextStream.getTracks().some((existingTrack) => existingTrack.id === track.id)) {
+          nextStream.addTrack(track);
+          changed = true;
         }
 
-        if (current[remoteParticipantId] === stream) {
+        if (!changed) {
           return current;
         }
 
         return {
           ...current,
-          [remoteParticipantId]: stream,
+          [remoteParticipantId]: nextStream,
         };
+      });
+    };
+
+    const removeRemoteTrackFromSource = (
+      source: OutgoingVideoSource,
+      track: MediaStreamTrack,
+    ) => {
+      const setStreams = source === CAMERA_SOURCE
+        ? setRemoteCameraStreams
+        : setRemotePresentationStreams;
+
+      setStreams((current) => {
+        const existingStream = current[remoteParticipantId];
+        if (!existingStream) {
+          return current;
+        }
+
+        const existingTrack = existingStream.getTracks().find(
+          (streamTrack) => streamTrack.id === track.id,
+        );
+        if (!existingTrack) {
+          return current;
+        }
+
+        existingStream.removeTrack(existingTrack);
+        if (existingStream.getTracks().length > 0) {
+          return {
+            ...current,
+            [remoteParticipantId]: existingStream,
+          };
+        }
+
+        const next = { ...current };
+        delete next[remoteParticipantId];
+        return next;
       });
     };
 
@@ -465,52 +549,46 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       connection.addTrack(track, localStreamRef.current as MediaStream);
     });
 
-    // Always create dedicated video transceivers for camera and presentation
-    // so a participant can send both streams concurrently.
+    // Add stable camera/presentation senders with associated streams before
+    // offer/answer creation so remote peers receive stream-bound tracks.
     const currentVideoTrack = cameraStreamRef.current?.getVideoTracks()[0];
+    const cameraSource =
+      currentVideoTrack && currentVideoTrack.readyState === "live" && !isVideoOff
+        ? { stream: cameraStreamRef.current as MediaStream, track: currentVideoTrack }
+        : getOrCreatePlaceholderSource(CAMERA_SOURCE);
     const currentPresentationTrack = screenTrackRef.current;
-    const cameraTransceiver = connection.addTransceiver("video", {
-      direction: "sendrecv",
-      streams: currentVideoTrack && cameraStreamRef.current
-        ? [cameraStreamRef.current]
-        : undefined,
-    });
-    const presentationTransceiver = connection.addTransceiver("video", {
-      direction: "sendrecv",
-    });
+    const presentationSource =
+      currentPresentationTrack &&
+      currentPresentationTrack.readyState === "live" &&
+      presentationStreamRef.current
+        ? {
+            stream: presentationStreamRef.current,
+            track: currentPresentationTrack,
+          }
+        : getOrCreatePlaceholderSource(PRESENTATION_SOURCE);
 
-    if (currentVideoTrack && currentVideoTrack.readyState === "live") {
-      console.debug(
-        `${LOG_TAG} Setting existing camera track on transceiver for peer=${remoteParticipantId}`,
-      );
-      await cameraTransceiver.sender.replaceTrack(currentVideoTrack);
-    }
-
-    if (currentPresentationTrack && currentPresentationTrack.readyState === "live") {
-      console.debug(
-        `${LOG_TAG} Setting existing presentation track on transceiver for peer=${remoteParticipantId}`,
-      );
-      await presentationTransceiver.sender.replaceTrack(currentPresentationTrack);
-    }
+    const cameraSender = connection.addTrack(cameraSource.track, cameraSource.stream);
+    connection.addTrack(
+      presentationSource.track,
+      presentationSource.stream,
+    );
+    const cameraTransceiver = connection
+      .getTransceivers()
+      .find((transceiver) => transceiver.sender === cameraSender);
 
     // ── ontrack: Receive remote streams ─────────────────────────────────
     connection.ontrack = (event) => {
       const source =
-        event.transceiver === presentationTransceiver
-          ? PRESENTATION_SOURCE
-          : CAMERA_SOURCE;
+        event.track.kind === "audio" || event.transceiver === cameraTransceiver
+          ? CAMERA_SOURCE
+          : PRESENTATION_SOURCE;
 
       console.debug(
         `${LOG_TAG} ontrack fired — peer=${remoteParticipantId} source=${source} kind=${event.track.kind} track.id=${event.track.id} streams=${event.streams.length}`,
       );
 
-      // CRITICAL FIX: Some browsers (especially with transceivers) fire
-      // ontrack without any streams. In that case, we create a synthetic
-      // MediaStream from the track so the video element has something to
-      // bind to.
-      const stream = event.streams[0] ?? new MediaStream([event.track]);
-
-      setRemoteStreamForSource(source, stream);
+      const streamHint = event.streams[0];
+      syncRemoteTrackForSource(source, event.track, streamHint);
 
       // If the remote track ends (e.g. peer leaves or stops sharing),
       // update the stream state so the UI reflects it.
@@ -518,16 +596,16 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         console.debug(
           `${LOG_TAG} Remote track ended — peer=${remoteParticipantId} source=${source} kind=${event.track.kind}`,
         );
-        setRemoteStreamForSource(source, null);
+        removeRemoteTrackFromSource(source, event.track);
       };
 
       // When tracks are added/removed from the stream (e.g. renegotiation),
       // force a state update so React re-renders with the latest stream.
       const forceStreamUpdate = () => {
-        setRemoteStreamForSource(source, stream);
+        syncRemoteTrackForSource(source, event.track, streamHint);
       };
-      stream.onaddtrack = forceStreamUpdate;
-      stream.onremovetrack = forceStreamUpdate;
+      streamHint?.addEventListener("addtrack", forceStreamUpdate);
+      streamHint?.addEventListener("removetrack", forceStreamUpdate);
     };
 
     // ── ICE candidate gathering ─────────────────────────────────────────
@@ -632,7 +710,15 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     }
 
     return connection;
-  }, [meetingId, participantId, removePeerConnection, sendSignal, shouldSkipPeerOperation]);
+  }, [
+    getOrCreatePlaceholderSource,
+    isVideoOff,
+    meetingId,
+    participantId,
+    removePeerConnection,
+    sendSignal,
+    shouldSkipPeerOperation,
+  ]);
 
   useEffect(() => {
     if (!participantId || !localStreamRef.current) {
@@ -921,96 +1007,131 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     cameraToggleTokenRef.current = token;
 
     if (!isVideoOff) {
-      // ── TURNING OFF ──────────────────────────────────────────────────
-      // Stop the hardware first, then update all peers and UI state.
-      stopAllVideoTracks(cameraStreamRef.current);
-      cameraStreamRef.current = null;
-      setCameraStream(null);
-
-      // Signal peers with a null track — they will see the video as ended.
-      await replaceOutgoingVideoTrack(peersRef.current, CAMERA_SOURCE, null);
+      const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0] ?? null;
+      const placeholderTrack = getOrCreatePlaceholderSource(CAMERA_SOURCE).track;
+      if (cameraTrack) {
+        cameraTrack.enabled = false;
+      }
+      await replaceOutgoingVideoTrack(peersRef.current, CAMERA_SOURCE, placeholderTrack);
 
       setIsVideoOff(true);
       await syncMediaState({ video: false });
-    } else {
-      // ── TURNING ON ───────────────────────────────────────────────────
-      const result = await acquireCameraStream();
-
-      // If the user toggled again while we were waiting for getUserMedia,
-      // discard this stale result and do nothing.
-      if (cameraToggleTokenRef.current !== token) {
-        if (result) stopAllVideoTracks(result.stream);
-        return;
-      }
-
-      if (!result) {
-        toast.error("Could not access camera. Check your browser permissions.");
-        return;
-      }
-
-      const { stream, videoTrack } = result;
-
-      // Guard: if the track died between getUserMedia resolving and now.
-      if (videoTrack.readyState !== "live") {
-        stopAllVideoTracks(stream);
-        toast.error("Camera track failed to start — please try again.");
-        return;
-      }
-
-      cameraStreamRef.current = stream;
-      setCameraStream(stream);
-
-      // Replace the outgoing video track on every peer connection.
-      // replaceTrack avoids a full SDP renegotiation in Chrome, Edge, and
-      // Safari 15+. The transceiver was pre-created in createPeerConnection,
-      // so the sender will always be found.
-      await replaceOutgoingVideoTrack(peersRef.current, CAMERA_SOURCE, videoTrack);
-
-      setIsVideoOff(false);
-      await syncMediaState({ video: true });
+      return;
     }
+
+    const result = await ensureCameraStream();
+
+    // If the user toggled again while we were waiting for getUserMedia,
+    // discard this stale result and do nothing.
+    if (cameraToggleTokenRef.current !== token) {
+      return;
+    }
+
+    if (!result) {
+      toast.error("Could not access camera. Check your browser permissions.");
+      return;
+    }
+
+    const { stream, videoTrack } = result;
+
+    // Guard: if the track died between getUserMedia resolving and now.
+    if (videoTrack.readyState !== "live") {
+      stopAllVideoTracks(stream);
+      toast.error("Camera track failed to start — please try again.");
+      return;
+    }
+
+    videoTrack.enabled = true;
+    setCameraStream(stream);
+
+    await replaceOutgoingVideoTrack(peersRef.current, CAMERA_SOURCE, videoTrack);
+
+    setIsVideoOff(false);
+    await syncMediaState({ video: true });
   };
 
   const startScreenShare = async () => {
     try {
+      console.debug(`${LOG_TAG} Requesting display media`);
+
+      if (screenTrackRef.current) {
+        await stopScreenShare();
+      }
+
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: false,
       });
       const [screenTrack] = stream.getVideoTracks();
       if (!screenTrack) {
+        stream.getTracks().forEach((track) => track.stop());
+        console.warn(`${LOG_TAG} Display media returned no video track`);
         return;
       }
 
+      const screenShareToken = Symbol("screen-share");
+      screenShareTokenRef.current = screenShareToken;
+      stoppingScreenShareRef.current = false;
+
       console.debug(
-        `${LOG_TAG} Screen share started — track id=${screenTrack.id}`,
+        `${LOG_TAG} Screen share started — track id=${screenTrack.id} label="${screenTrack.label}"`,
       );
 
       screenTrackRef.current = screenTrack;
+      presentationStreamRef.current = stream;
+      setPresentationStream(stream);
+      setIsScreenSharing(true);
+
       screenTrack.onended = () => {
+        if (screenShareTokenRef.current !== screenShareToken || stoppingScreenShareRef.current) {
+          return;
+        }
+
         console.debug(`${LOG_TAG} Screen share track ended by user/OS`);
         void stopScreenShare();
       };
 
+      console.debug(`${LOG_TAG} Publishing presentation track to peers`);
       await replaceOutgoingVideoTrack(peersRef.current, PRESENTATION_SOURCE, screenTrack);
-      setPresentationStream(stream);
-      setIsScreenSharing(true);
       await syncMediaState({ screen: true });
-    } catch {
+    } catch (error) {
+      console.warn(`${LOG_TAG} Screen share failed:`, error);
       toast.error("Screen share was cancelled");
     }
   };
 
   const stopScreenShare = async () => {
-    screenTrackRef.current?.stop();
+    const activeTrack = screenTrackRef.current;
+    const activeStream = presentationStreamRef.current;
+
+    stoppingScreenShareRef.current = true;
+    screenShareTokenRef.current = null;
+    screenTrackRef.current = null;
+    presentationStreamRef.current = null;
+
+    activeTrack?.stop();
+    activeStream?.getTracks().forEach((track) => {
+      if (track !== activeTrack && track.readyState !== "ended") {
+        track.stop();
+      }
+    });
+
     screenTrackRef.current = null;
 
     console.debug(`${LOG_TAG} Screen share stopped`);
 
-    await replaceOutgoingVideoTrack(peersRef.current, PRESENTATION_SOURCE, null);
-    setPresentationStream(null);
-    setIsScreenSharing(false);
-    await syncMediaState({ screen: false });
+    try {
+      await replaceOutgoingVideoTrack(
+        peersRef.current,
+        PRESENTATION_SOURCE,
+        getOrCreatePlaceholderSource(PRESENTATION_SOURCE).track,
+      );
+      setPresentationStream(null);
+      setIsScreenSharing(false);
+      await syncMediaState({ screen: false });
+    } finally {
+      stoppingScreenShareRef.current = false;
+    }
   };
 
   return {

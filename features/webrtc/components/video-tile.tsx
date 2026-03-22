@@ -33,6 +33,7 @@ export function VideoTile({
   isPresentation?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const shouldRenderVideo = Boolean(stream && (isCameraEnabled || isPresentation));
   // Use dedicated audioStream for speaking detection when provided
   // (local tile sends audio-only stream; remote tiles carry both).
   const isSpeaking = useAudioActivity(audioStream ?? stream);
@@ -47,9 +48,9 @@ export function VideoTile({
     const el = videoRef.current;
     if (!el) return;
 
-    el.srcObject = stream;
+    el.srcObject = shouldRenderVideo ? stream : null;
 
-    if (!stream) return;
+    if (!stream || !shouldRenderVideo) return;
 
     // Autoplay policy can block play() even with the autoplay attribute.
     // We call play() explicitly and retry muted if the browser blocks it.
@@ -75,7 +76,7 @@ export function VideoTile({
       stream.removeEventListener("addtrack", onTrackChange);
       stream.removeEventListener("removetrack", onTrackChange);
     };
-  }, [stream]);
+  }, [shouldRenderVideo, stream]);
 
   return (
     <div
@@ -85,7 +86,7 @@ export function VideoTile({
         className,
       )}
     >
-      {stream && (isCameraEnabled || isPresentation || isLocal) ? (
+      {shouldRenderVideo ? (
         <video
           ref={videoRef}
           autoPlay

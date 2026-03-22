@@ -37,7 +37,7 @@ export function ParticipantGrid({
 }: {
   /** Audio-only stream from the local mic — used exclusively for the speaking indicator. */
   localStream: MediaStream | null;
-  /** Camera-only stream for the local video tile display. Null when camera is off. */
+  /** Persistent camera-only stream for the local tile display. */
   cameraStream: MediaStream | null;
   presentationStream: MediaStream | null;
   remoteCameraStreams: Record<string, MediaStream>;
@@ -63,7 +63,9 @@ export function ParticipantGrid({
               stream={
                 screenSharer._id === localParticipantId
                   ? presentationStream
-                  : remotePresentationStreams[screenSharer._id] ?? null
+                  : remotePresentationStreams[screenSharer._id] ??
+                    remoteCameraStreams[screenSharer._id] ??
+                    null
               }
               name={screenSharer.name}
               imageUrl={screenSharer.imageUrl}

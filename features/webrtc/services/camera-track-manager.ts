@@ -2,6 +2,10 @@
 const LOG_TAG = "[CameraTrackManager]";
 
 export type OutgoingVideoSource = "camera" | "presentation";
+export type StableVideoSource = {
+  stream: MediaStream;
+  track: MediaStreamTrack;
+};
 
 export interface CameraAcquireResult {
   stream: MediaStream;
@@ -118,6 +122,14 @@ export async function replaceOutgoingVideoTrack(
       const sender = videoTransceiver?.sender;
 
       if (sender) {
+        const currentTrack = sender.track;
+        if (currentTrack?.id === track?.id) {
+          console.debug(
+            `${LOG_TAG} replaceTrack skipped for peer=${peerId} source=${source} track unchanged`,
+          );
+          return;
+        }
+
         try {
           await sender.replaceTrack(track);
           console.debug(
@@ -137,6 +149,28 @@ export async function replaceOutgoingVideoTrack(
       }
     }),
   );
+}
+
+export function createPlaceholderVideoStream(source: OutgoingVideoSource): StableVideoSource {
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 360;
+
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.fillStyle = "#050816";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const stream = canvas.captureStream(1);
+  const track = stream.getVideoTracks()[0];
+
+  if (!track) {
+    throw new Error(`Unable to create placeholder ${source} video track`);
+  }
+
+  track.contentHint = source === "presentation" ? "detail" : "motion";
+  return { stream, track };
 }
 
 // ─── Rapid-toggle debounce ────────────────────────────────────────────────────
