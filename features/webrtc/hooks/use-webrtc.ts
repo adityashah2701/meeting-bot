@@ -30,6 +30,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const processedSignalIdsRef = useRef<Set<string>>(new Set());
@@ -90,11 +91,30 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         return;
       }
 
+      // Check existing permission state — prompt only when necessary.
+      // If already denied, show actionable error immediately.
+      try {
+        if (navigator.permissions) {
+          const micPerm = await navigator.permissions.query({ name: "microphone" as PermissionName });
+          if (micPerm.state === "denied") {
+            setPermissionDenied(true);
+            toast.error(
+              "Microphone access is blocked. Open browser site settings and allow microphone, then refresh.",
+              { duration: 10000 },
+            );
+            return;
+          }
+        }
+      } catch {
+        // permissions API not available — fall through to getUserMedia which will prompt
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true,
         });
+        setPermissionDenied(false);
         cameraStreamRef.current = stream;
         // Default camera to off — disable video tracks immediately
         stream.getVideoTracks().forEach((track) => {
@@ -109,8 +129,19 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           isCameraEnabled: false,
           isScreenSharing: false,
         }).catch(() => undefined);
-      } catch {
-        toast.error("Camera or microphone access is required");
+      } catch (err) {
+        const isDenied =
+          err instanceof DOMException &&
+          (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
+        if (isDenied) {
+          setPermissionDenied(true);
+          toast.error(
+            "Camera/microphone access denied. Allow permissions in your browser's site settings and refresh.",
+            { duration: 10000 },
+          );
+        } else {
+          toast.error("Camera or microphone access is required");
+        }
       }
     };
 
@@ -372,6 +403,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     isAudioMuted,
     isVideoOff,
     isScreenSharing,
+    permissionDenied,
     toggleAudio,
     toggleVideo,
     startScreenShare,

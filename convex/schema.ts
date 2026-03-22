@@ -134,4 +134,15 @@ export default defineSchema({
     connected: v.boolean(),
     updatedAt: v.number(),
   }).index("by_orgId", ["orgId"]),
+
+  summary_chunks: defineTable({
+    meetingId: v.id("meetings"),
+    chunkIndex: v.number(),
+    summary: v.string(),
+    key_points: v.array(v.string()),
+    decisions: v.array(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_meetingId", ["meetingId"])
+    .index("by_meetingId_and_chunkIndex", ["meetingId", "chunkIndex"]),
 });

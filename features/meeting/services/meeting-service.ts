@@ -8,6 +8,8 @@ export const meetingService = {
   endMeeting: api.meetings.index.endMeeting,
   getSummary: api.meetings.index.getSummary,
   saveSummary: api.meetings.index.saveSummary,
+  saveChunk: api.meetings.summaryChunks.saveChunk,
+  listChunks: api.meetings.summaryChunks.listChunks,
   listParticipants: api.participants.index.list,
   joinMeeting: api.participants.index.join,
   leaveMeeting: api.participants.index.leave,
@@ -78,8 +80,18 @@ export async function scheduleMeeting(
   });
 }
 
+export type ActionItem = {
+  task: string;
+  assignee: string | null;
+  due: string | null;
+};
+
 export type MeetingSummaryResult = {
   summary: string;
+  key_points: string[];
+  decisions: string[];
+  action_items: ActionItem[];
+  /** Flat list of task titles for backwards-compatible createTasksFromSummary */
   actionItems: string[];
 };
 

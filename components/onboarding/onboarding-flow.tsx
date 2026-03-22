@@ -8,7 +8,6 @@ import { useRouter } from 'next/navigation';
 
 export function OnboardingFlow() {
   const [step, setStep] = useState(1);
-  const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const { isLoaded: isOrgLoaded, organization } = useOrganization();
   const { isLoaded: isAuthLoaded, userId } = useAuth();
@@ -19,10 +18,6 @@ export function OnboardingFlow() {
   // Local state for Step 2
   const [autoJoin, setAutoJoin] = useState(true);
   const [language, setLanguage] = useState('English');
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // Redirect to sign in if not authenticated
   React.useEffect(() => {
@@ -38,7 +33,7 @@ export function OnboardingFlow() {
     }
   }, [isOrgLoaded, organization, router]);
 
-  if (!mounted || !isAuthLoaded || !isOrgLoaded) {
+  if (!isAuthLoaded || !isOrgLoaded) {
     return (
       <div className="w-full flex items-center justify-center min-h-[60vh]">
         <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />

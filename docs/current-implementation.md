@@ -61,7 +61,7 @@ The application is not yet a full production meeting platform. Several areas are
 
 - live transcription uses `window.SpeechRecognition` or `window.webkitSpeechRecognition`
 - meeting summarization uses `POST /api/summarize`
-- the summarization route calls Groq's OpenAI-compatible API with model `llama3-70b-8192`
+- the summarization route calls Groq's OpenAI-compatible API with model `llama-3.3-70b-versatile`
 
 ## 3. High-Level Architecture
 

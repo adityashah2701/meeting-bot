@@ -1,217 +1,280 @@
-You are working on a Next.js 16 + React 19 + Convex + Clerk + WebRTC meeting platform.
+# 🚀 Meeting Bot — Transcription & AI Summary Optimization Prompt
 
-The current implementation is functional but has UI inconsistencies, UX issues in meeting room, and missing polish in workflows.
+You are working on a **Next.js + Convex + WebRTC meeting platform**.
 
-Your task is to refactor, enhance UI/UX, improve meeting room behavior, and integrate Groq SDK properly.
+The current implementation has:
+- browser-based SpeechRecognition (local only)
+- manual AI summary trigger
+- no batching or pipeline
+- no structured output
+- no speaker-aware processing
 
-🧩 1. Install & Integrate Groq SDK (IMPORTANT)
-Install package:
-npm install groq-sdk
-Refactor /api/summarize/route.ts:
-Replace raw fetch/OpenAI-compatible call with official Groq SDK
-Use environment variable:
-GROQ_API_KEY=
-Implementation requirements:
-Use groq.chat.completions.create
-Model: llama3-70b-8192
-Add:
-streaming support (optional but preferred)
-better prompt formatting
-error handling with proper status codes
-timeout handling
-🎨 2. Fix Design System Inconsistency (CRITICAL)
-Problem:
+Your task is to **redesign transcription and AI summarization into a scalable, production-grade pipeline**.
 
-Auth + onboarding use old tokens (bg-surface, etc.)
-Main app uses Tailwind + CSS variables
+---
 
-Fix:
-Remove ALL old token usage
-Standardize everything to:
-bg-background
-bg-card
-text-foreground
-text-muted-foreground
-border-border
-Use existing shadcn components properly wherever possible.
-Do NOT remove shadcn from the app.
-Do NOT replace shadcn primitives with custom ad-hoc markup if an existing primitive already fits.
-Prefer composing from the existing `components/ui/*` layer first.
-Replace custom UI only when it is duplicating an existing shadcn primitive.
-Preferred components:
-Card
-Dialog
-Tabs
-ScrollArea
-Avatar
-Button
-Sheet
-🎥 3. Meeting Room UI Fixes (HIGH PRIORITY)
-❌ Current Issues:
-Controls shift downward when content grows
-Meeting area becomes scrollable
-Layout breaks with participants
-Color scheme mismatch
-✅ Required Fixes:
-3.1 Layout Structure (NO SCROLL BREAK)
+# 🧠 1. Core Principle
 
-Refactor meeting room layout:
+Follow this architecture:
 
-<div className="h-screen flex flex-col">
-  <Header />
+Audio → Transcription (STT) → Processing → AI Summary (LLM)
 
-  <div className="flex-1 overflow-hidden flex">
-    <ParticipantGrid />   // NO scroll on full page
-    <MeetingSidePanel />  // Scrollable internally
-  </div>
+Do NOT tightly couple these steps.
 
-  <MeetingControls />     // ALWAYS fixed
-</div>
-Rules:
-❌ No page-level scroll
-✅ Only side panel scrolls (ScrollArea)
-✅ Participant grid is responsive and contained
-3.2 Fix Controls Position
-Controls should be:
-fixed bottom center
-floating with slight blur background
-not pushed by content
+---
 
-Use:
+# 🎙️ 2. Transcription System (Redesign)
 
-className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50"
+## 2.1 Hybrid Model
 
-Wrap with:
+Implement a 2-layer system:
 
-Card or div with:
-bg-background/80
-backdrop-blur
-border
-3.3 Fix Color Mismatch
-Meeting room must follow the default shadcn theme used by the dashboard.
-Do not introduce a special meeting-only color palette.
-Do not add extra custom colors just for the meeting screen.
-Keep color usage simple and token-based.
-Use:
-bg-background
-bg-card
-text-foreground
-text-muted-foreground
-border-border
-Ensure consistency with global CSS tokens
-3.4 Avatar for Camera Off (IMPORTANT UX)
+### Layer 1 — Real-time (Frontend)
+- Use browser SpeechRecognition
+- Purpose:
+  - Live captions
+  - Instant feedback
 
-When isCameraEnabled === false:
+### Layer 2 — Backend (Accurate)
+- Prepare abstraction for external STT (future-ready)
+- Accept audio/text chunks for processing
 
-Replace video tile with:
+---
 
-<Avatar>
-  <AvatarImage src={imageUrl} />
-  <AvatarFallback>{initials}</AvatarFallback>
-</Avatar>
+## 2.2 Chunk-Based Processing (MANDATORY)
 
-Enhancements:
+DO NOT send transcript line-by-line.
 
-Show:
-user initials fallback
-mic status icon
-Add subtle animation/pulse when speaking (optional)
-3.5 Participant Grid Improvement
-Use responsive grid:
-grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4
-Maintain aspect ratio using:
-<AspectRatio ratio={16 / 9}>
-Avoid layout jumps
-🧠 4. Improve Meeting UX Flow
-Fix Meeting Lifecycle Issues
-Problem:
-Scheduled meetings don’t auto-start
-Joining doesn’t update state correctly
-Fix:
-On participants.join:
-If meeting is scheduled AND time <= now:
-set:
-status = active
-startedAt = now
-Add Auto Summary Trigger
+Instead:
 
-Instead of manual-only:
+- Buffer transcript in memory
+- Flush every:
+  - 5–10 seconds OR
+  - sentence completion
 
-Auto trigger summary when:
-meeting ends
-Debounce transcript aggregation
-Add Action Item Extraction (NEW FEATURE)
+Example logic:
+
+
+buffer = []
+
+onFinalTranscript(text):
+buffer.push(text)
+
+every 5 seconds:
+sendBatch(buffer)
+buffer = []
+
+
+---
+
+## 2.3 Transcript Schema (IMPORTANT)
+
+Ensure each transcript includes:
+
+
+{
+meetingId,
+speakerId,
+speakerName,
+text,
+timestamp,
+confidence (optional)
+}
+
+
+---
+
+## 2.4 Speaker Awareness (Future Ready)
+
+Design system to support:
+- speaker diarization
+- multiple speakers
+
+Even if initially mocked.
+
+---
+
+# ⚡ 3. Real-Time Pipeline
+
+Process data in parallel:
+
+Audio
+  → STT
+    → Live UI captions
+    → Buffer storage
+    → Background AI trigger
+
+DO NOT block UI for AI processing.
+
+---
+
+# 🧾 4. AI Summary System (Redesign)
+
+## 4.1 Incremental Summarization (CRITICAL)
+
+DO NOT send full transcript every time.
+
+Instead:
+
+- Split transcript into chunks
+- Summarize each chunk
+- Merge summaries later
+
+Example:
+
+
+chunkSummary = summarize(last_5_minutes)
+store(chunkSummary)
+
+finalSummary = merge(all_chunk_summaries)
+
+
+---
+
+## 4.2 Structured Output (MANDATORY)
+
+LLM must return JSON:
+
+
+{
+"summary": "...",
+"key_points": [],
+"decisions": [],
+"action_items": [
+{
+"task": "...",
+"assignee": "...",
+"due": null
+}
+]
+}
+
+
+---
+
+## 4.3 Auto Summary Trigger
+
+Trigger summary:
+- every 5–10 minutes (background)
+- when meeting ends
+
+Also allow manual trigger.
+
+---
+
+# 🧩 5. Action Item Extraction
 
 After summary:
 
-Extract tasks
-Store in tasks table
-⚡ 5. Performance & Optimization
-5.1 WebRTC Optimization
-Avoid re-creating peer connections unnecessarily
-Memoize participants
-Clean up signals aggressively
-5.2 Transcription Optimization
-Batch transcript writes instead of per-line mutation
-Debounce API calls
-5.3 Convex Query Optimization
-Scope dashboard queries to org properly (currently not fully scoped)
-Avoid over-fetching transcript data
-🧭 6. Workflow Improvements (IMPORTANT)
-Improve User Flow:
-Current:
+- Extract action items
+- Store in `tasks` table
 
-Login → Org → Dashboard → Meetings → Create → Join
 
-Improve to:
-Add Quick Actions in Dashboard:
-Start Instant Meeting
-Schedule Meeting (Dialog)
-Meeting Creation (Already good but refine)
-Keep dialog-based creation
-Improve UI:
-Tabs: Instant / Schedule
-Better defaults
-Inline validation
-Add Empty States
+tasks.create({
+meetingId,
+title,
+assignee,
+source: "ai"
+})
 
-Use shadcn Empty or custom:
 
-No meetings
-No tasks
-No transcripts
-🧱 7. Component Refactor Rules
-Keep ALL UI inside features/*
-No UI logic in app/
-Break into:
-components/
-hooks/
-services/
-🧼 8. Cleanups
-Do NOT remove shadcn components from /components/ui as part of this refactor.
-Keep the existing shadcn component inventory intact unless there is a separate cleanup task.
-Focus on using the existing shadcn primitives correctly and consistently.
-Remove duplicate logic
-Fix route inconsistencies:
-ended meeting → /details
-✨ 9. Bonus Enhancements (If time permits)
-Add:
-speaking indicator (audio activity hook already exists)
-pinned participant
-screen share focus mode
-keyboard shortcuts (mute, camera)
-✅ Expected Output
-Clean, consistent UI
-Fully fixed meeting room layout
-Stable controls (no shifting)
-Avatar fallback working
-Groq SDK integrated properly
-Better UX across dashboard + meetings
-Improved performance
-⚠️ Constraints
-MUST use shadcn components wherever possible
-DO NOT remove existing shadcn components just to simplify the codebase
-DO NOT create a custom meeting-room color system
-DO NOT introduce new UI libraries
-DO NOT break existing Convex APIs unless necessary
-Maintain feature-based architecture
+---
+
+# ⚡ 6. Performance Optimization
+
+## MUST IMPLEMENT:
+
+### 6.1 Debounce AI Calls
+- Never call AI per transcript line
+
+### 6.2 Batch Database Writes
+- Combine transcript inserts
+
+### 6.3 Avoid Reprocessing
+- Cache chunk summaries
+
+---
+
+# 🧱 7. Data Model Enhancements
+
+Add new table:
+
+## summary_chunks
+
+
+{
+meetingId,
+chunkIndex,
+summary,
+createdAt
+}
+
+
+---
+
+# 🔄 8. Final Pipeline Flow
+
+User speaks
+  ↓
+Browser STT (real-time captions)
+  ↓
+Buffered transcript
+  ↓
+Batch saved to Convex
+  ↓
+Background AI summarization (chunked)
+  ↓
+Final summary on meeting end
+  ↓
+Action items extracted → stored
+
+---
+
+# 🧪 9. Future-Ready Design
+
+Ensure system can later integrate:
+
+- Whisper / Deepgram / AssemblyAI
+- full meeting audio processing
+- multi-speaker diarization
+
+Keep STT layer abstracted.
+
+---
+
+# 🎯 10. UX Requirements
+
+- Show:
+  - live captions (interim)
+  - finalized transcript
+- Show loading states:
+  - “AI is generating summary…”
+- Allow:
+  - regenerate summary
+  - edit transcript
+
+---
+
+# 🔒 11. Safety & Practical Notes
+
+- Add transcription consent notice
+- Allow transcript correction
+- Do not assume AI output is always correct
+
+---
+
+# ⚠️ Constraints
+
+- Do NOT break existing Convex APIs unnecessarily
+- Maintain feature-based architecture
+- Keep system modular and extensible
+
+---
+
+# ✅ Expected Outcome
+
+- Scalable transcription pipeline
+- Efficient AI summarization (chunked, not brute force)
+- Structured outputs (summary + action items)
+- Optimized performance
+- Production-ready architecture

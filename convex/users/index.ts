@@ -11,29 +11,56 @@ export const upsertUser = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
+    // First check by clerkId (most reliable — set by webhook)
+    const userByClerkId = await ctx.db
       .query("users")
       .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
       .first();
 
-    if (user) {
-      // Keep existing orgIds
-      await ctx.db.patch(user._id, {
+    const fullName =
+      [args.firstName, args.lastName].filter(Boolean).join(" ") || undefined;
+
+    if (userByClerkId) {
+      await ctx.db.patch(userByClerkId._id, {
         email: args.email,
         firstName: args.firstName,
         lastName: args.lastName,
+        fullName,
         imageUrl: args.imageUrl,
       });
-    } else {
-      await ctx.db.insert("users", {
-        tokenIdentifier: args.clerkId,
-        ...args,
-        fullName:
-          [args.firstName, args.lastName].filter(Boolean).join(" ") ||
-          undefined,
-        orgIds: [],
-      });
+      return;
     }
+
+    // Fallback: check by the legacy tokenIdentifier = clerkId pattern
+    const userByTokenId = await ctx.db
+      .query("users")
+      .withIndex("by_tokenIdentifier", (q) => q.eq("tokenIdentifier", args.clerkId))
+      .first();
+
+    if (userByTokenId) {
+      await ctx.db.patch(userByTokenId._id, {
+        clerkId: args.clerkId,
+        email: args.email,
+        firstName: args.firstName,
+        lastName: args.lastName,
+        fullName,
+        imageUrl: args.imageUrl,
+      });
+      return;
+    }
+
+    // New user — tokenIdentifier is initially the clerkId; syncUser will
+    // correct it to the full Clerk tokenIdentifier on first sign-in.
+    await ctx.db.insert("users", {
+      tokenIdentifier: args.clerkId,
+      clerkId: args.clerkId,
+      email: args.email,
+      firstName: args.firstName,
+      lastName: args.lastName,
+      fullName,
+      imageUrl: args.imageUrl,
+      orgIds: [],
+    });
   },
 });
 
@@ -132,38 +159,39 @@ export const syncUser = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
-
     const { subject, name, email, pictureUrl, tokenIdentifier } = identity;
 
-    const user = await ctx.db
+    const updates = {
+      tokenIdentifier,
+      clerkId: subject,
+      email: email || "",
+      fullName: name || "",
+      firstName: name?.split(" ")[0] || "",
+      lastName: name?.split(" ").slice(1).join(" ") || "",
+      imageUrl: pictureUrl || "",
+      orgIds: args.orgIds,
+    };
+
+    // Primary lookup: by tokenIdentifier (correct path after first sync)
+    let user = await ctx.db
       .query("users")
-      .withIndex("by_tokenIdentifier", (q) =>
-        q.eq("tokenIdentifier", tokenIdentifier),
-      )
+      .withIndex("by_tokenIdentifier", (q) => q.eq("tokenIdentifier", tokenIdentifier))
       .first();
 
+    if (!user) {
+      // Fallback: webhook created the user with tokenIdentifier = clerkId
+      user = await ctx.db
+        .query("users")
+        .withIndex("by_clerkId", (q) => q.eq("clerkId", subject))
+        .first();
+    }
+
     if (user) {
-      await ctx.db.patch(user._id, {
-        tokenIdentifier,
-        firstName: name?.split(" ")[0] || "",
-        lastName: name?.split(" ").slice(1).join(" ") || "",
-        fullName: name || "",
-        clerkId: subject,
-        email: email || user.email,
-        imageUrl: pictureUrl || "",
-        orgIds: args.orgIds,
-      });
+      // Update and correct the tokenIdentifier to the full Clerk value
+      await ctx.db.patch(user._id, updates);
     } else {
-      await ctx.db.insert("users", {
-        tokenIdentifier,
-        clerkId: subject,
-        email: email || "",
-        fullName: name || "",
-        firstName: name?.split(" ")[0] || "",
-        lastName: name?.split(" ").slice(1).join(" ") || "",
-        imageUrl: pictureUrl || "",
-        orgIds: args.orgIds,
-      });
+      await ctx.db.insert("users", updates);
     }
   },
 });
+
