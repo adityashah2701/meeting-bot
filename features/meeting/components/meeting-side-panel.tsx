@@ -78,7 +78,13 @@ export function MeetingSidePanel({
     try {
       const result = await summarizeTranscript(transcriptPayload);
       setStructuredResult(result);
-      await saveSummary({ meetingId, summary: result.summary });
+      await saveSummary({ 
+        meetingId, 
+        summary: result.summary,
+        key_points: result.key_points,
+        decisions: result.decisions,
+        action_items: result.action_items,
+      });
 
       if (result.actionItems.length > 0) {
         await createTasksFromSummary({ orgId, meetingId, titles: result.actionItems });

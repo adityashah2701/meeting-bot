@@ -131,7 +131,13 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     if (finalTranscript.length === 0) return null;
 
     const result = await summarizeTranscript(finalTranscript);
-    await saveSummary({ meetingId, summary: result.summary });
+    await saveSummary({ 
+      meetingId, 
+      summary: result.summary,
+      key_points: result.key_points,
+      decisions: result.decisions,
+      action_items: result.action_items,
+    });
     if (result.actionItems.length > 0) {
       await createTasksFromSummary({ orgId: currentMeeting.orgId, meetingId, titles: result.actionItems });
     }

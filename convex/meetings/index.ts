@@ -75,6 +75,9 @@ export const get = query({
       durationMs: getMeetingDuration(meeting),
       activeParticipants: participants.length,
       summary: latestSummary?.content ?? null,
+      key_points: latestSummary?.key_points ?? [],
+      decisions: latestSummary?.decisions ?? [],
+      action_items: latestSummary?.action_items ?? [],
     };
   },
 });
@@ -104,7 +107,21 @@ export const getSummary = query({
 });
 
 export const saveSummary = mutation({
-  args: { meetingId: v.id("meetings"), summary: v.string() },
+  args: {
+    meetingId: v.id("meetings"),
+    summary: v.string(),
+    key_points: v.optional(v.array(v.string())),
+    decisions: v.optional(v.array(v.string())),
+    action_items: v.optional(
+      v.array(
+        v.object({
+          task: v.string(),
+          assignee: v.union(v.string(), v.null()),
+          due: v.union(v.string(), v.null()),
+        }),
+      ),
+    ),
+  },
   handler: async (ctx, args) => {
     await requireIdentity(ctx);
     const existing = await ctx.db
@@ -117,6 +134,9 @@ export const saveSummary = mutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         content: args.summary,
+        key_points: args.key_points,
+        decisions: args.decisions,
+        action_items: args.action_items,
         updatedAt: Date.now(),
       });
     } else {
@@ -124,6 +144,9 @@ export const saveSummary = mutation({
         meetingId: args.meetingId,
         type: "summary",
         content: args.summary,
+        key_points: args.key_points,
+        decisions: args.decisions,
+        action_items: args.action_items,
         updatedAt: Date.now(),
       });
     }

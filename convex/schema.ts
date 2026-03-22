@@ -81,6 +81,17 @@ export default defineSchema({
     meetingId: v.id("meetings"),
     type: v.union(v.literal("summary"), v.literal("recording")),
     content: v.optional(v.string()),
+    key_points: v.optional(v.array(v.string())),
+    decisions: v.optional(v.array(v.string())),
+    action_items: v.optional(
+      v.array(
+        v.object({
+          task: v.string(),
+          assignee: v.union(v.string(), v.null()),
+          due: v.union(v.string(), v.null()),
+        }),
+      ),
+    ),
     storageId: v.optional(v.id("_storage")),
     updatedAt: v.number(),
   }).index("by_meetingId_and_type", ["meetingId", "type"]),
