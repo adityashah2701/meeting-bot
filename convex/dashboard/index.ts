@@ -14,7 +14,16 @@ export const getOverview = query({
 
     const activeMeeting =
       meetings.find((meeting) => meeting.status === "active") ?? null;
-    const summaries = await ctx.db.query("meeting_assets").take(50);
+    const summaryAssets = await Promise.all(
+      meetings.map((meeting) =>
+        ctx.db
+          .query("meeting_assets")
+          .withIndex("by_meetingId_and_type", (q) =>
+            q.eq("meetingId", meeting._id).eq("type", "summary"),
+          )
+          .unique(),
+      ),
+    );
     const tasks = await ctx.db
       .query("tasks")
       .withIndex("by_orgId_and_status", (q) =>
@@ -31,9 +40,7 @@ export const getOverview = query({
         scheduledMeetings: meetings.filter(
           (meeting) => meeting.status === "scheduled",
         ).length,
-        summariesGenerated: summaries.filter(
-          (asset) => asset.type === "summary",
-        ).length,
+        summariesGenerated: summaryAssets.filter(Boolean).length,
         openTasks: tasks.length,
       },
       recentMeetings: meetings.slice(0, 6),

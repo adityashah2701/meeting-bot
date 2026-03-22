@@ -121,7 +121,9 @@ export default defineSchema({
     dueAt: v.optional(v.number()),
     source: v.union(v.literal("manual"), v.literal("summary")),
     createdAt: v.number(),
-  }).index("by_orgId_and_status", ["orgId", "status"]),
+  })
+    .index("by_orgId_and_status", ["orgId", "status"])
+    .index("by_meetingId", ["meetingId"]),
 
   integrations: defineTable({
     orgId: v.string(),

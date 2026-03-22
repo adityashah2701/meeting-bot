@@ -53,3 +53,18 @@ export const send = mutation({
     });
   },
 });
+
+export const clear = mutation({
+  args: {
+    signalIds: v.array(v.id("signals")),
+  },
+  handler: async (ctx, args) => {
+    await requireIdentity(ctx);
+
+    for (const signalId of args.signalIds) {
+      await ctx.db.delete(signalId);
+    }
+
+    return args.signalIds.length;
+  },
+});

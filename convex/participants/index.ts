@@ -10,6 +10,24 @@ export const join = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     const now = Date.now();
+    const meeting = await ctx.db.get(args.meetingId);
+
+    if (!meeting) {
+      throw new Error("Meeting not found");
+    }
+
+    if (
+      meeting.status === "scheduled" &&
+      typeof meeting.scheduledFor === "number" &&
+      meeting.scheduledFor <= now
+    ) {
+      await ctx.db.patch(args.meetingId, {
+        status: "active",
+        startedAt: meeting.startedAt ?? now,
+        lastActivityAt: now,
+      });
+    }
+
     const existing = await getMeetingParticipant(
       ctx,
       args.meetingId,

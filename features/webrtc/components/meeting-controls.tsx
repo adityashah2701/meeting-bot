@@ -24,11 +24,17 @@ export function MeetingControls({
   onLeave: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3 border border-border bg-card p-3">
+    <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-background/90 px-5 py-3 shadow-2xl shadow-black/30 backdrop-blur-md">
       <MicToggle muted={isAudioMuted} onClick={onToggleAudio} />
       <CameraToggle off={isVideoOff} onClick={onToggleVideo} />
       <ScreenShareButton active={isScreenSharing} onClick={onToggleScreenShare} />
-      <Button variant="destructive" size="lg" onClick={onLeave} className="px-4">
+      <div className="mx-2 h-7 w-px bg-border" />
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={onLeave}
+        className="rounded-xl px-4 gap-2"
+      >
         <PhoneOff className="h-4 w-4" />
         Leave
       </Button>

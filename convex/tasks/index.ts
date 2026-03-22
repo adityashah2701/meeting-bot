@@ -39,3 +39,55 @@ export const create = mutation({
     });
   },
 });
+
+export const createFromSummary = mutation({
+  args: {
+    orgId: v.string(),
+    meetingId: v.id("meetings"),
+    titles: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireIdentity(ctx);
+
+    const normalizedTitles = args.titles
+      .map((title) => title.trim())
+      .filter(Boolean);
+
+    if (normalizedTitles.length === 0) {
+      return [];
+    }
+
+    const existingTasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))
+      .take(100);
+
+    const existingTitleSet = new Set(
+      existingTasks.map((task) => task.title.trim().toLowerCase()),
+    );
+
+    const now = Date.now();
+    const createdTaskIds = [];
+
+    for (const title of normalizedTitles) {
+      const normalizedTitle = title.toLowerCase();
+      if (existingTitleSet.has(normalizedTitle)) {
+        continue;
+      }
+
+      const taskId = await ctx.db.insert("tasks", {
+        orgId: args.orgId,
+        meetingId: args.meetingId,
+        title,
+        status: "open",
+        source: "summary",
+        createdAt: now,
+      });
+
+      existingTitleSet.add(normalizedTitle);
+      createdTaskIds.push(taskId);
+    }
+
+    return createdTaskIds;
+  },
+});

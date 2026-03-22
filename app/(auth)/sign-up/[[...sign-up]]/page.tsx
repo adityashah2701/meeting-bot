@@ -5,19 +5,19 @@ export const metadata = createMetadata("Sign Up", "Create your Meeting Bot accou
 
 export default function SignUpPage() {
   return (
-    <SignUp 
+    <SignUp
       appearance={{
         elements: {
           rootBox: "w-full",
-          card: "shadow-none border border-outline-variant/10 rounded-2xl bg-surface-container-lowest w-full",
-          headerTitle: "font-sans text-2xl font-bold tracking-tight text-on-surface",
-          headerSubtitle: "text-on-surface-variant text-sm",
-          formButtonPrimary: "bg-primary hover:bg-primary-dim text-on-primary font-medium",
-          formFieldLabel: "text-sm font-sans font-medium text-on-surface",
-          formFieldInput: "bg-surface-container-low border-none focus:ring-2 focus:ring-primary/20",
-          footerActionLink: "text-primary hover:text-primary-dim hover:underline",
-          socialButtonsBlockButton: "border border-outline-variant/20 hover:bg-surface-container-low text-on-surface",
-        }
+          card: "w-full border border-border bg-card shadow-none rounded-none",
+          headerTitle: "text-2xl font-bold tracking-tight text-foreground",
+          headerSubtitle: "text-sm text-muted-foreground",
+          formButtonPrimary: "bg-primary text-primary-foreground hover:bg-primary/90 font-medium",
+          formFieldLabel: "text-sm font-medium text-foreground",
+          formFieldInput: "border border-border bg-background focus:ring-2 focus:ring-primary/20 rounded-none",
+          footerActionLink: "text-primary hover:underline",
+          socialButtonsBlockButton: "border border-border bg-background text-foreground hover:bg-muted rounded-none",
+        },
       }}
     />
   );

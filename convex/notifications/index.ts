@@ -22,6 +22,13 @@ export const list = query({
 export const markRead = mutation({
   args: { notificationId: v.id("notifications") },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const notification = await ctx.db.get(args.notificationId);
+
+    if (!notification || notification.userTokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Notification not found");
+    }
+
     await ctx.db.patch(args.notificationId, { isRead: true });
   },
 });

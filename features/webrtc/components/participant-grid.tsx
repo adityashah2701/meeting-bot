@@ -1,15 +1,30 @@
 "use client";
 
+import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { cn } from "@/lib/utils";
 import { VideoTile } from "@/features/webrtc/components/video-tile";
 
 type Participant = {
   _id: string;
   name: string;
+  imageUrl?: string;
   isMicEnabled: boolean;
   isCameraEnabled: boolean;
   isScreenSharing: boolean;
 };
+
+function getGridClass(count: number) {
+  if (count === 1) return "grid-cols-1 place-items-center";
+  if (count === 2) return "grid-cols-2";
+  if (count <= 4) return "grid-cols-2";
+  if (count <= 6) return "grid-cols-3";
+  return "grid-cols-4";
+}
+
+function getTileMaxWidth(count: number) {
+  if (count === 1) return "max-w-3xl w-full";
+  return "w-full";
+}
 
 export function ParticipantGrid({
   localStream,
@@ -24,110 +39,99 @@ export function ParticipantGrid({
   participants: Participant[];
   localParticipantId: string | null;
 }) {
-  const participantCount = participants.length;
-  const localParticipant = participants.find((participant) => participant._id === localParticipantId) ?? null;
-  const screenSharer = participants.find((participant) => participant.isScreenSharing) ?? null;
+  const localParticipant = participants.find((p) => p._id === localParticipantId) ?? null;
+  const screenSharer = participants.find((p) => p.isScreenSharing) ?? null;
   const thumbnailParticipants = participants.filter(
-    (participant) =>
-      participant._id !== screenSharer?._id && participant._id !== localParticipantId,
+    (p) => p._id !== screenSharer?._id && p._id !== localParticipantId,
   );
-  const galleryGridClassName =
-    participantCount <= 2
-      ? "md:grid-cols-2"
-      : participantCount <= 4
-        ? "md:grid-cols-2 xl:grid-cols-2"
-        : participantCount <= 6
-          ? "md:grid-cols-2 xl:grid-cols-3"
-          : participantCount <= 9
-            ? "grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
-            : "grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5";
 
-  const galleryTileClassName =
-    participantCount >= 10 ? "min-h-36" : participantCount >= 7 ? "min-h-40" : "min-h-52";
-
-  const thumbnailRailClassName =
-    thumbnailParticipants.length >= 5
-      ? "grid-cols-2 xl:grid-cols-2"
-      : thumbnailParticipants.length >= 3
-        ? "grid-cols-2 xl:grid-cols-1"
-        : "grid-cols-1";
-
-  return (
-    <div className="grid h-full gap-4">
-      {screenSharer ? (
-        <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="min-h-0">
+  // Screen share layout
+  if (screenSharer) {
+    return (
+      <div className="flex h-full min-h-0 gap-3">
+        {/* Main presentation area */}
+        <div className="min-h-0 flex-1">
+          <AspectRatio ratio={16 / 9} className="h-full max-h-full">
             <VideoTile
-              className="h-full min-h-[320px]"
+              className="h-full rounded-xl"
               stream={
                 screenSharer._id === localParticipantId
                   ? presentationStream
                   : remoteStreams[screenSharer._id] ?? null
               }
               name={screenSharer.name}
+              imageUrl={screenSharer.imageUrl}
               isLocal={screenSharer._id === localParticipantId}
               isMicEnabled={screenSharer.isMicEnabled}
               isCameraEnabled={screenSharer.isCameraEnabled}
               isScreenSharing={screenSharer.isScreenSharing}
               isPresentation
             />
-          </div>
-          <div className="grid max-h-full gap-4 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-1">
-            {localParticipant ? (
+          </AspectRatio>
+        </div>
+
+        {/* Thumbnail rail */}
+        <div className="flex w-48 shrink-0 flex-col gap-3 overflow-y-auto">
+          {localParticipant && (
+            <AspectRatio ratio={16 / 9}>
               <VideoTile
-                key={localParticipant._id}
-                className="min-h-36"
+                className="h-full rounded-lg"
                 stream={localStream}
                 name={localParticipant.name}
+                imageUrl={localParticipant.imageUrl}
                 isLocal
                 isMicEnabled={localParticipant.isMicEnabled}
                 isCameraEnabled={localParticipant.isCameraEnabled}
                 isScreenSharing={localParticipant.isScreenSharing}
               />
-            ) : null}
-            <div className={cn("grid gap-4", thumbnailRailClassName)}>
-              {thumbnailParticipants.map((participant) => (
-                <VideoTile
-                  key={participant._id}
-                  className="min-h-32"
-                  stream={remoteStreams[participant._id] ?? null}
-                  name={participant.name}
-                  isMicEnabled={participant.isMicEnabled}
-                  isCameraEnabled={participant.isCameraEnabled}
-                  isScreenSharing={participant.isScreenSharing}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className={cn("grid h-full gap-4 overflow-y-auto pr-1", galleryGridClassName)}>
-          {localParticipant && (
-            <VideoTile
-              className={galleryTileClassName}
-              stream={localStream}
-              name={localParticipant.name}
-              isLocal
-              isMicEnabled={localParticipant.isMicEnabled}
-              isCameraEnabled={localParticipant.isCameraEnabled}
-              isScreenSharing={localParticipant.isScreenSharing}
-            />
+            </AspectRatio>
           )}
-          {participants
-            .filter((participant) => participant._id !== localParticipantId)
-            .map((participant) => (
+          {thumbnailParticipants.map((p) => (
+            <AspectRatio ratio={16 / 9} key={p._id}>
               <VideoTile
-                key={participant._id}
-                className={galleryTileClassName}
-                stream={remoteStreams[participant._id] ?? null}
-                name={participant.name}
-                isMicEnabled={participant.isMicEnabled}
-                isCameraEnabled={participant.isCameraEnabled}
-                isScreenSharing={participant.isScreenSharing}
+                className="h-full rounded-lg"
+                stream={remoteStreams[p._id] ?? null}
+                name={p.name}
+                imageUrl={p.imageUrl}
+                isMicEnabled={p.isMicEnabled}
+                isCameraEnabled={p.isCameraEnabled}
+                isScreenSharing={p.isScreenSharing}
               />
-            ))}
+            </AspectRatio>
+          ))}
         </div>
-      )}
+      </div>
+    );
+  }
+
+  const allParticipants = [
+    ...(localParticipant ? [localParticipant] : []),
+    ...participants.filter((p) => p._id !== localParticipantId),
+  ];
+  const count = allParticipants.length;
+  const gridClass = getGridClass(count);
+
+  return (
+    <div className={cn("grid h-full min-h-0 place-content-center gap-3", gridClass)}>
+      {allParticipants.map((p) => {
+        const isLocal = p._id === localParticipantId;
+        return (
+          <div key={p._id} className={cn(getTileMaxWidth(count))}>
+            <AspectRatio ratio={16 / 9}>
+              <VideoTile
+                className="h-full rounded-xl"
+                stream={isLocal ? localStream : (remoteStreams[p._id] ?? null)}
+                name={p.name}
+                imageUrl={p.imageUrl}
+                isLocal={isLocal}
+                isMicEnabled={p.isMicEnabled}
+                isCameraEnabled={p.isCameraEnabled}
+                isScreenSharing={p.isScreenSharing}
+              />
+            </AspectRatio>
+          </div>
+        );
+      })}
     </div>
   );
 }

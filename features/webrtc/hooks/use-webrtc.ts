@@ -21,13 +21,14 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const heartbeat = useMutation(meetingService.heartbeatParticipant);
   const updateMediaState = useMutation(meetingService.updateMediaState);
   const sendSignal = useMutation(meetingService.sendSignal);
+  const clearSignals = useMutation(meetingService.clearSignals);
 
   const [participantId, setParticipantId] = useState<Id<"meeting_participants"> | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [presentationStream, setPresentationStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [isAudioMuted, setIsAudioMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
 
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
@@ -82,6 +83,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   }, [heartbeat, meetingId, participantId]);
 
   useEffect(() => {
+    // This effect runs exactly once. The localStreamRef guard prevents re-runs
+    // if React ever calls the effect again (e.g. StrictMode double-invoke).
     const setup = async () => {
       if (localStreamRef.current) {
         return;
@@ -93,14 +96,27 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           audio: true,
         });
         cameraStreamRef.current = stream;
+        // Default camera to off — disable video tracks immediately
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
         localStreamRef.current = stream;
         setLocalStream(stream);
+        // Sync the disabled state to the server
+        void updateMediaState({
+          meetingId,
+          isMicEnabled: true,
+          isCameraEnabled: false,
+          isScreenSharing: false,
+        }).catch(() => undefined);
       } catch {
         toast.error("Camera or microphone access is required");
       }
     };
 
     void setup();
+    // Run once on mount — meetingId and updateMediaState are stable at join time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -234,19 +250,30 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   }, [createPeerConnection, localStream, participantId, remoteParticipants]);
 
   useEffect(() => {
-    signals.forEach((signal) => {
-      if (processedSignalIdsRef.current.has(signal._id)) {
-        return;
-      }
+    const pendingSignals = signals.filter(
+      (signal) => !processedSignalIdsRef.current.has(signal._id),
+    );
 
+    if (pendingSignals.length === 0) {
+      return;
+    }
+
+    pendingSignals.forEach((signal) => {
       processedSignalIdsRef.current.add(signal._id);
-      const payload = JSON.parse(signal.payload) as SignalPayload;
+    });
 
-      void (async () => {
-        const connection = await createPeerConnection(signal.senderParticipantId, false);
+    void Promise.all(
+      pendingSignals.map(async (signal) => {
+        const payload = JSON.parse(signal.payload) as SignalPayload;
+        const connection = await createPeerConnection(
+          signal.senderParticipantId,
+          false,
+        );
 
         if (signal.kind === "offer" && payload.sdp) {
-          await connection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await connection.setRemoteDescription(
+            new RTCSessionDescription(payload.sdp),
+          );
           const answer = await connection.createAnswer();
           await connection.setLocalDescription(answer);
           await sendSignal({
@@ -258,15 +285,25 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         }
 
         if (signal.kind === "answer" && payload.sdp) {
-          await connection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await connection.setRemoteDescription(
+            new RTCSessionDescription(payload.sdp),
+          );
         }
 
         if (signal.kind === "ice-candidate" && payload.candidate) {
-          await connection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          await connection.addIceCandidate(
+            new RTCIceCandidate(payload.candidate),
+          );
         }
-      })().catch(() => undefined);
-    });
-  }, [createPeerConnection, meetingId, sendSignal, signals]);
+      }),
+    )
+      .then(() =>
+        clearSignals({
+          signalIds: pendingSignals.map((signal) => signal._id),
+        }).catch(() => undefined),
+      )
+      .catch(() => undefined);
+  }, [clearSignals, createPeerConnection, meetingId, sendSignal, signals]);
 
   const toggleAudio = async () => {
     const nextValue = !isAudioMuted;

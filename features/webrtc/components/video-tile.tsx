@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { MicOff, MonitorUp, VideoOff } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAudioActivity } from "@/features/webrtc/hooks/use-audio-activity";
 
@@ -9,6 +10,7 @@ export function VideoTile({
   className,
   stream,
   name,
+  imageUrl,
   isLocal = false,
   isMicEnabled = true,
   isCameraEnabled = true,
@@ -18,6 +20,7 @@ export function VideoTile({
   className?: string;
   stream: MediaStream | null;
   name: string;
+  imageUrl?: string;
   isLocal?: boolean;
   isMicEnabled?: boolean;
   isCameraEnabled?: boolean;
@@ -26,6 +29,12 @@ export function VideoTile({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSpeaking = useAudioActivity(stream);
+  const initials = name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 
   useEffect(() => {
     if (videoRef.current) {
@@ -36,36 +45,56 @@ export function VideoTile({
   return (
     <div
       className={cn(
-        "relative flex min-h-52 overflow-hidden border border-border bg-zinc-950",
-        isSpeaking && "ring-2 ring-white/50",
+        "relative flex h-full overflow-hidden bg-[#1a1a2e] shadow-lg transition-all duration-200",
+        isSpeaking && "ring-2 ring-primary ring-offset-1 ring-offset-background",
         className,
       )}
     >
-      {stream && isCameraEnabled ? (
+      {stream && (isCameraEnabled || isPresentation) ? (
         <video
           ref={videoRef}
           autoPlay
           muted={isLocal}
           playsInline
           className={cn(
-            "h-full w-full bg-black",
+            "h-full w-full",
             isPresentation ? "object-contain" : "object-cover",
             isLocal && !isPresentation && "scale-x-[-1]",
           )}
         />
       ) : (
-        <div className="flex flex-1 items-center justify-center bg-zinc-900 text-sm text-zinc-300">
-          <div className="flex flex-col items-center gap-2">
-            <VideoOff className="h-6 w-6" />
-            <span>Camera unavailable</span>
+        <div className="flex flex-1 items-center justify-center bg-linear-to-br from-[#1a1a2e] to-[#16213e]">
+          <div className="flex flex-col items-center gap-3">
+            <div
+              className={cn(
+                "rounded-full p-1 transition-all duration-300",
+                isSpeaking && "ring-2 ring-primary ring-offset-2 ring-offset-[#1a1a2e]",
+              )}
+            >
+              <Avatar className="size-16 shadow-md">
+                <AvatarImage alt={name} src={imageUrl} />
+                <AvatarFallback className="bg-primary/20 text-base font-semibold text-primary">
+                  {initials || "?"}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-2.5 py-1 text-xs text-white/60 backdrop-blur">
+              <VideoOff className="h-3 w-3" />
+              <span>Camera off</span>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between border-t border-white/10 bg-black/70 px-3 py-2 text-xs text-white">
-        <span>{name}{isLocal ? " (You)" : ""}</span>
-        <div className="flex items-center gap-2">
-          {!isMicEnabled && <MicOff className="h-3.5 w-3.5" />}
+      {/* Name bar */}
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-linear-to-t from-black/80 to-transparent px-3 py-2.5 text-xs text-white">
+        <span className="font-medium drop-shadow">{name}{isLocal ? " (You)" : ""}</span>
+        <div className="flex items-center gap-2 opacity-80">
+          {!isMicEnabled && (
+            <div className="rounded-full bg-red-500/80 p-0.5">
+              <MicOff className="h-3 w-3 text-white" />
+            </div>
+          )}
           {isScreenSharing && <MonitorUp className="h-3.5 w-3.5" />}
         </div>
       </div>

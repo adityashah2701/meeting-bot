@@ -83,7 +83,11 @@ export function DashboardPage() {
               overview.recentMeetings.map((meeting) => (
                 <Link
                   key={meeting._id}
-                  href={`/meeting/${meeting._id}`}
+                  href={
+                    meeting.status === "ended"
+                      ? `/meeting/${meeting._id}/details`
+                      : `/meeting/${meeting._id}`
+                  }
                   className="flex items-center justify-between border border-border px-4 py-3 text-sm transition-colors hover:bg-muted/50"
                 >
                   <div>

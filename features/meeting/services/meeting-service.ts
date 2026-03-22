@@ -17,8 +17,11 @@ export const meetingService = {
   sendMessage: api.messages.index.send,
   listSignals: api.signals.index.listForParticipant,
   sendSignal: api.signals.index.send,
+  clearSignals: api.signals.index.clear,
   listTranscripts: api.transcripts.index.list,
   addTranscript: api.transcripts.index.add,
+  addTranscriptBatch: api.transcripts.index.addBatch,
+  createTasksFromSummary: api.tasks.index.createFromSummary,
 };
 
 type CreateMeetingMutation = (args: {
@@ -75,7 +78,14 @@ export async function scheduleMeeting(
   });
 }
 
-export async function summarizeTranscript(transcript: Array<{ sender: string; text: string }>) {
+export type MeetingSummaryResult = {
+  summary: string;
+  actionItems: string[];
+};
+
+export async function summarizeTranscript(
+  transcript: Array<{ sender: string; text: string }>,
+) {
   const response = await fetch("/api/summarize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -87,5 +97,5 @@ export async function summarizeTranscript(transcript: Array<{ sender: string; te
     throw new Error(payload.error ?? "Failed to generate summary");
   }
 
-  return payload.summary as string;
+  return payload as MeetingSummaryResult;
 }
