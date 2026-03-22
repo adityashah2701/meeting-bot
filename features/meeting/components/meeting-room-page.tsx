@@ -78,7 +78,8 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     localStream,
     cameraStream,
     presentationStream,
-    remoteStreams,
+    remoteCameraStreams,
+    remotePresentationStreams,
     participants,
     isAudioMuted,
     isVideoOff,
@@ -295,7 +296,8 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
               localStream={localStream}
               cameraStream={cameraStream}
               presentationStream={presentationStream}
-              remoteStreams={remoteStreams}
+              remoteCameraStreams={remoteCameraStreams}
+              remotePresentationStreams={remotePresentationStreams}
               participants={participants}
               localParticipantId={participantId}
             />

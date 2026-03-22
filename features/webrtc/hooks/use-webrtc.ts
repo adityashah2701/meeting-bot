@@ -8,6 +8,7 @@ import { meetingService } from "@/features/meeting/services/meeting-service";
 import {
   acquireCameraStream,
   createToggleToken,
+  type OutgoingVideoSource,
   replaceOutgoingVideoTrack,
   stopAllVideoTracks,
 } from "@/features/webrtc/services/camera-track-manager";
@@ -57,6 +58,10 @@ function isPeerConnectionClosed(connection: RTCPeerConnection) {
 // description on the RTCPeerConnection. Applying them in that state throws.
 // We buffer them per-peer and drain after setRemoteDescription succeeds.
 type EarlyIceBuffer = Record<string, RTCIceCandidateInit[]>;
+type RemoteMediaStreams = Record<string, MediaStream>;
+
+const CAMERA_SOURCE: OutgoingVideoSource = "camera";
+const PRESENTATION_SOURCE: OutgoingVideoSource = "presentation";
 
 export function useWebrtc(meetingId: Id<"meetings">) {
   const joinMeeting = useMutation(meetingService.joinMeeting);
@@ -73,7 +78,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   // and is used by the transcription hook.
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [presentationStream, setPresentationStream] = useState<MediaStream | null>(null);
-  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteCameraStreams, setRemoteCameraStreams] = useState<RemoteMediaStreams>({});
+  const [remotePresentationStreams, setRemotePresentationStreams] = useState<RemoteMediaStreams>({});
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -88,9 +94,12 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   // cameraStreamRef holds the camera-only stream currently active.
   // It is null when the camera is off, meaning no hardware lock is held.
   const cameraStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamsRef = useRef<Record<string, MediaStream>>({});
+  const remoteCameraStreamsRef = useRef<RemoteMediaStreams>({});
+  const remotePresentationStreamsRef = useRef<RemoteMediaStreams>({});
   const presentationStreamRef = useRef<MediaStream | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const activeRemoteParticipantIdsRef = useRef<Set<string>>(new Set());
+  const recoveringPeerIdsRef = useRef<Set<string>>(new Set());
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   // Buffer for ICE candidates that arrived before setRemoteDescription.
   const earlyIceBufferRef = useRef<EarlyIceBuffer>({});
@@ -108,8 +117,12 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const signals = useMemo(() => signalRows ?? [], [signalRows]);
 
   useEffect(() => {
-    remoteStreamsRef.current = remoteStreams;
-  }, [remoteStreams]);
+    remoteCameraStreamsRef.current = remoteCameraStreams;
+  }, [remoteCameraStreams]);
+
+  useEffect(() => {
+    remotePresentationStreamsRef.current = remotePresentationStreams;
+  }, [remotePresentationStreams]);
 
   useEffect(() => {
     presentationStreamRef.current = presentationStream;
@@ -119,6 +132,12 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     () => participants.filter((participant) => participant._id !== participantId),
     [participantId, participants],
   );
+
+  useEffect(() => {
+    activeRemoteParticipantIdsRef.current = new Set(
+      remoteParticipants.map((participant) => participant._id),
+    );
+  }, [remoteParticipants]);
 
   useEffect(() => {
     joinMeeting({ meetingId })
@@ -255,7 +274,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
   useEffect(() => {
     const peerConnectionsRef = peersRef;
-    const remoteMediaRef = remoteStreamsRef;
+    const remoteCameraMediaRef = remoteCameraStreamsRef;
+    const remotePresentationMediaRef = remotePresentationStreamsRef;
     const sharedPresentationRef = presentationStreamRef;
     const activeLocalStreamRef = localStreamRef; // audio-only stream
     const activeCameraStreamRef = cameraStreamRef; // camera stream (may be null)
@@ -264,7 +284,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       // Close all peer connections first so they stop requesting frames.
       Object.values(peerConnectionsRef.current).forEach((connection) => connection.close());
       // Stop all remote streams.
-      Object.values(remoteMediaRef.current).forEach((stream) => {
+      [...Object.values(remoteCameraMediaRef.current), ...Object.values(remotePresentationMediaRef.current)].forEach((stream) => {
         stream.getTracks().forEach((track) => track.stop());
       });
       // Stop screen share track.
@@ -339,6 +359,54 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     [],
   );
 
+  const removePeerConnection = useCallback(
+    (remoteParticipantId: string, connection?: RTCPeerConnection) => {
+      const currentConnection = peersRef.current[remoteParticipantId];
+      if (!currentConnection) {
+        delete pendingIceCandidatesRef.current[remoteParticipantId];
+        delete earlyIceBufferRef.current[remoteParticipantId];
+        return;
+      }
+
+      if (connection && currentConnection !== connection) {
+        return;
+      }
+
+      try {
+        currentConnection.close();
+      } catch (error) {
+        console.warn(
+          `${LOG_TAG} Failed to close peer=${remoteParticipantId} during cleanup:`,
+          error,
+        );
+      }
+
+      delete peersRef.current[remoteParticipantId];
+      delete pendingIceCandidatesRef.current[remoteParticipantId];
+      delete earlyIceBufferRef.current[remoteParticipantId];
+
+      setRemoteCameraStreams((current) => {
+        if (!(remoteParticipantId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[remoteParticipantId];
+        return next;
+      });
+      setRemotePresentationStreams((current) => {
+        if (!(remoteParticipantId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[remoteParticipantId];
+        return next;
+      });
+    },
+    [],
+  );
+
   const createPeerConnection = useCallback(async (
     remoteParticipantId: string,
     shouldCreateOffer: boolean,
@@ -359,6 +427,36 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     const connection = new RTCPeerConnection(buildRtcConfig());
     peersRef.current[remoteParticipantId] = connection;
 
+    const setRemoteStreamForSource = (
+      source: OutgoingVideoSource,
+      stream: MediaStream | null,
+    ) => {
+      const setStreams = source === CAMERA_SOURCE
+        ? setRemoteCameraStreams
+        : setRemotePresentationStreams;
+
+      setStreams((current) => {
+        if (!stream) {
+          if (!(remoteParticipantId in current)) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[remoteParticipantId];
+          return next;
+        }
+
+        if (current[remoteParticipantId] === stream) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [remoteParticipantId]: stream,
+        };
+      });
+    };
+
     // ── Add audio tracks from the audio-only stream ─────────────────────
     localStreamRef.current?.getAudioTracks().forEach((track) => {
       console.debug(
@@ -367,37 +465,43 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       connection.addTrack(track, localStreamRef.current as MediaStream);
     });
 
-    // ── CRITICAL FIX: Always add a video transceiver ────────────────────
-    // Camera starts OFF, so there is no video track to addTrack() with.
-    // Without a transceiver, there is no video m-line in the SDP, meaning:
-    //   1. replaceTrack() later has no sender to target
-    //   2. The remote peer never gets a video track in ontrack
-    //
-    // We use addTransceiver("video", { direction: "sendrecv" }) to ensure
-    // a video m-line is always present. When the camera turns on, we use
-    // replaceTrack() on this sender — no renegotiation needed.
-    //
-    // If the camera IS already on, we set the track on the transceiver's
-    // sender immediately so the remote peer gets video right away.
+    // Always create dedicated video transceivers for camera and presentation
+    // so a participant can send both streams concurrently.
     const currentVideoTrack = cameraStreamRef.current?.getVideoTracks()[0];
-    const transceiver = connection.addTransceiver("video", {
+    const currentPresentationTrack = screenTrackRef.current;
+    const cameraTransceiver = connection.addTransceiver("video", {
       direction: "sendrecv",
       streams: currentVideoTrack && cameraStreamRef.current
         ? [cameraStreamRef.current]
         : undefined,
     });
+    const presentationTransceiver = connection.addTransceiver("video", {
+      direction: "sendrecv",
+    });
 
     if (currentVideoTrack && currentVideoTrack.readyState === "live") {
       console.debug(
-        `${LOG_TAG} Setting existing video track on transceiver for peer=${remoteParticipantId}`,
+        `${LOG_TAG} Setting existing camera track on transceiver for peer=${remoteParticipantId}`,
       );
-      await transceiver.sender.replaceTrack(currentVideoTrack);
+      await cameraTransceiver.sender.replaceTrack(currentVideoTrack);
+    }
+
+    if (currentPresentationTrack && currentPresentationTrack.readyState === "live") {
+      console.debug(
+        `${LOG_TAG} Setting existing presentation track on transceiver for peer=${remoteParticipantId}`,
+      );
+      await presentationTransceiver.sender.replaceTrack(currentPresentationTrack);
     }
 
     // ── ontrack: Receive remote streams ─────────────────────────────────
     connection.ontrack = (event) => {
+      const source =
+        event.transceiver === presentationTransceiver
+          ? PRESENTATION_SOURCE
+          : CAMERA_SOURCE;
+
       console.debug(
-        `${LOG_TAG} ontrack fired — peer=${remoteParticipantId} kind=${event.track.kind} track.id=${event.track.id} streams=${event.streams.length}`,
+        `${LOG_TAG} ontrack fired — peer=${remoteParticipantId} source=${source} kind=${event.track.kind} track.id=${event.track.id} streams=${event.streams.length}`,
       );
 
       // CRITICAL FIX: Some browsers (especially with transceivers) fire
@@ -406,26 +510,21 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       // bind to.
       const stream = event.streams[0] ?? new MediaStream([event.track]);
 
-      setRemoteStreams((current) => ({
-        ...current,
-        [remoteParticipantId]: stream,
-      }));
+      setRemoteStreamForSource(source, stream);
 
       // If the remote track ends (e.g. peer leaves or stops sharing),
       // update the stream state so the UI reflects it.
       event.track.onended = () => {
         console.debug(
-          `${LOG_TAG} Remote track ended — peer=${remoteParticipantId} kind=${event.track.kind}`,
+          `${LOG_TAG} Remote track ended — peer=${remoteParticipantId} source=${source} kind=${event.track.kind}`,
         );
+        setRemoteStreamForSource(source, null);
       };
 
       // When tracks are added/removed from the stream (e.g. renegotiation),
       // force a state update so React re-renders with the latest stream.
       const forceStreamUpdate = () => {
-        setRemoteStreams((current) => ({
-          ...current,
-          [remoteParticipantId]: stream,
-        }));
+        setRemoteStreamForSource(source, stream);
       };
       stream.onaddtrack = forceStreamUpdate;
       stream.onremovetrack = forceStreamUpdate;
@@ -453,11 +552,34 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       );
 
       if (state === "failed") {
+        if (shouldSkipPeerOperation(remoteParticipantId, connection, "failed connection recovery")) {
+          return;
+        }
+        if (recoveringPeerIdsRef.current.has(remoteParticipantId)) {
+          return;
+        }
+        if (!activeRemoteParticipantIdsRef.current.has(remoteParticipantId)) {
+          return;
+        }
+
         console.warn(
-          `${LOG_TAG} Connection FAILED for peer=${remoteParticipantId} — restarting ICE`,
+          `${LOG_TAG} Connection FAILED for peer=${remoteParticipantId} — rebuilding peer connection`,
         );
-        connection.restartIce();
-        toast.error("Connection issue detected, retrying media path");
+        recoveringPeerIdsRef.current.add(remoteParticipantId);
+        toast.error("Connection issue detected, reconnecting participant media");
+
+        removePeerConnection(remoteParticipantId, connection);
+
+        void createPeerConnection(remoteParticipantId, true)
+          .catch((error) => {
+            console.error(
+              `${LOG_TAG} Failed to rebuild connection for peer=${remoteParticipantId}:`,
+              error,
+            );
+          })
+          .finally(() => {
+            recoveringPeerIdsRef.current.delete(remoteParticipantId);
+          });
       }
       if (state === "disconnected") {
         toast.message("Participant connection lost. Attempting recovery…");
@@ -510,7 +632,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     }
 
     return connection;
-  }, [meetingId, participantId, sendSignal, shouldSkipPeerOperation]);
+  }, [meetingId, participantId, removePeerConnection, sendSignal, shouldSkipPeerOperation]);
 
   useEffect(() => {
     if (!participantId || !localStreamRef.current) {
@@ -526,18 +648,11 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
     Object.keys(peersRef.current).forEach((peerId) => {
       if (!activeParticipantIds.has(peerId as Id<"meeting_participants">)) {
-        peersRef.current[peerId]?.close();
-        delete peersRef.current[peerId];
-        // Clean up early ICE buffer for departed peers.
-        delete earlyIceBufferRef.current[peerId];
-        setRemoteStreams((current) => {
-          const next = { ...current };
-          delete next[peerId];
-          return next;
-        });
+        recoveringPeerIdsRef.current.delete(peerId);
+        removePeerConnection(peerId);
       }
     });
-  }, [createPeerConnection, localStream, participantId, remoteParticipants]);
+  }, [createPeerConnection, localStream, participantId, remoteParticipants, removePeerConnection]);
 
   useEffect(() => {
     const pendingSignals = signals.filter(
@@ -813,7 +928,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       setCameraStream(null);
 
       // Signal peers with a null track — they will see the video as ended.
-      await replaceOutgoingVideoTrack(peersRef.current, null);
+      await replaceOutgoingVideoTrack(peersRef.current, CAMERA_SOURCE, null);
 
       setIsVideoOff(true);
       await syncMediaState({ video: false });
@@ -849,7 +964,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       // replaceTrack avoids a full SDP renegotiation in Chrome, Edge, and
       // Safari 15+. The transceiver was pre-created in createPeerConnection,
       // so the sender will always be found.
-      await replaceOutgoingVideoTrack(peersRef.current, videoTrack);
+      await replaceOutgoingVideoTrack(peersRef.current, CAMERA_SOURCE, videoTrack);
 
       setIsVideoOff(false);
       await syncMediaState({ video: true });
@@ -877,10 +992,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         void stopScreenShare();
       };
 
-      await replaceOutgoingVideoTrack(peersRef.current, screenTrack);
+      await replaceOutgoingVideoTrack(peersRef.current, PRESENTATION_SOURCE, screenTrack);
       setPresentationStream(stream);
       setIsScreenSharing(true);
-      await syncMediaState({ screen: true, video: true });
+      await syncMediaState({ screen: true });
     } catch {
       toast.error("Screen share was cancelled");
     }
@@ -890,23 +1005,12 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     screenTrackRef.current?.stop();
     screenTrackRef.current = null;
 
-    console.debug(`${LOG_TAG} Screen share stopped — restoring camera track`);
+    console.debug(`${LOG_TAG} Screen share stopped`);
 
-    // After stopping the screen share, restore the camera track if one is
-    // active. If the camera was off when the screen share started, we restore
-    // it to null, which the service handles gracefully.
-    const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0] ?? null;
-    const isRestoredCameraLive = cameraTrack?.readyState === "live";
-
-    await replaceOutgoingVideoTrack(peersRef.current, cameraTrack);
+    await replaceOutgoingVideoTrack(peersRef.current, PRESENTATION_SOURCE, null);
     setPresentationStream(null);
     setIsScreenSharing(false);
-
-    // If there is no live camera track to restore, mark camera as off.
-    await syncMediaState({ screen: false, video: isRestoredCameraLive });
-    if (!isRestoredCameraLive) {
-      setIsVideoOff(true);
-    }
+    await syncMediaState({ screen: false });
   };
 
   return {
@@ -914,7 +1018,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     localStream,
     cameraStream,
     presentationStream,
-    remoteStreams,
+    remoteCameraStreams,
+    remotePresentationStreams,
     participants,
     isAudioMuted,
     isVideoOff,

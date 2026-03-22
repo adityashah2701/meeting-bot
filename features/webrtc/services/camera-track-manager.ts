@@ -1,6 +1,8 @@
 
 const LOG_TAG = "[CameraTrackManager]";
 
+export type OutgoingVideoSource = "camera" | "presentation";
+
 export interface CameraAcquireResult {
   stream: MediaStream;
   videoTrack: MediaStreamTrack;
@@ -96,21 +98,23 @@ export async function acquireCameraStream(constraints?: MediaTrackConstraints): 
  */
 export async function replaceOutgoingVideoTrack(
   peers: Record<string, RTCPeerConnection>,
+  source: OutgoingVideoSource,
   track: MediaStreamTrack | null,
 ): Promise<void> {
   console.debug(
-    `${LOG_TAG} replaceOutgoingVideoTrack — track=${track ? `id=${track.id} readyState=${track.readyState}` : "null"} peers=${Object.keys(peers).length}`,
+    `${LOG_TAG} replaceOutgoingVideoTrack — source=${source} track=${track ? `id=${track.id} readyState=${track.readyState}` : "null"} peers=${Object.keys(peers).length}`,
   );
 
   await Promise.all(
     Object.entries(peers).map(async ([peerId, pc]) => {
-      // Find the video sender via transceivers — this works even when the
-      // sender's current track is null (camera was off when peer connected).
-      const videoTransceiver = pc.getTransceivers().find(
+      const videoTransceivers = pc.getTransceivers().filter(
         (t) =>
           t.receiver.track?.kind === "video" ||
           t.sender.track?.kind === "video",
       );
+      const videoTransceiver = source === "camera"
+        ? videoTransceivers[0]
+        : videoTransceivers[1];
       const sender = videoTransceiver?.sender;
 
       if (sender) {
@@ -128,7 +132,7 @@ export async function replaceOutgoingVideoTrack(
         }
       } else {
         console.warn(
-          `${LOG_TAG} No video sender found for peer=${peerId} — cannot replace track`,
+          `${LOG_TAG} No ${source} video sender found for peer=${peerId} — cannot replace track`,
         );
       }
     }),

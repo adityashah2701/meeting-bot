@@ -30,7 +30,8 @@ export function ParticipantGrid({
   localStream,
   cameraStream,
   presentationStream,
-  remoteStreams,
+  remoteCameraStreams,
+  remotePresentationStreams,
   participants,
   localParticipantId,
 }: {
@@ -39,7 +40,8 @@ export function ParticipantGrid({
   /** Camera-only stream for the local video tile display. Null when camera is off. */
   cameraStream: MediaStream | null;
   presentationStream: MediaStream | null;
-  remoteStreams: Record<string, MediaStream>;
+  remoteCameraStreams: Record<string, MediaStream>;
+  remotePresentationStreams: Record<string, MediaStream>;
   participants: Participant[];
   localParticipantId: string | null;
 }) {
@@ -61,7 +63,7 @@ export function ParticipantGrid({
               stream={
                 screenSharer._id === localParticipantId
                   ? presentationStream
-                  : remoteStreams[screenSharer._id] ?? null
+                  : remotePresentationStreams[screenSharer._id] ?? null
               }
               name={screenSharer.name}
               imageUrl={screenSharer.imageUrl}
@@ -91,11 +93,24 @@ export function ParticipantGrid({
               />
             </AspectRatio>
           )}
+          {screenSharer && screenSharer._id !== localParticipantId && (
+            <AspectRatio ratio={16 / 9}>
+              <VideoTile
+                className="h-full rounded-lg"
+                stream={remoteCameraStreams[screenSharer._id] ?? null}
+                name={screenSharer.name}
+                imageUrl={screenSharer.imageUrl}
+                isMicEnabled={screenSharer.isMicEnabled}
+                isCameraEnabled={screenSharer.isCameraEnabled}
+                isScreenSharing={screenSharer.isScreenSharing}
+              />
+            </AspectRatio>
+          )}
           {thumbnailParticipants.map((p) => (
             <AspectRatio ratio={16 / 9} key={p._id}>
               <VideoTile
                 className="h-full rounded-lg"
-                stream={remoteStreams[p._id] ?? null}
+                stream={remoteCameraStreams[p._id] ?? null}
                 name={p.name}
                 imageUrl={p.imageUrl}
                 isMicEnabled={p.isMicEnabled}
@@ -125,7 +140,7 @@ export function ParticipantGrid({
             <AspectRatio ratio={16 / 9}>
               <VideoTile
                 className="h-full rounded-xl"
-                stream={isLocal ? cameraStream : (remoteStreams[p._id] ?? null)}
+                stream={isLocal ? cameraStream : (remoteCameraStreams[p._id] ?? null)}
                 audioStream={isLocal ? localStream : undefined}
                 name={p.name}
                 imageUrl={p.imageUrl}
