@@ -6,7 +6,7 @@ This document describes the current codebase as implemented today. It focuses on
 
 ## 1. Executive Summary
 
-Meeting Bot is a Next.js 16 + React 19 application that uses Clerk for authentication and organizations, Convex for the backend/database/realtime layer, browser-native WebRTC for live media, browser Speech Recognition for live transcription, and a small Next.js API route for AI summarization via Groq.
+Meeting Bot is a Next.js 16 + React 19 application that uses Clerk for authentication and organizations, Convex for the backend/database/realtime layer, browser-native WebRTC for live media, browser Web Audio API for audio capture, and Next.js API routes for AI summarization and transcription via Groq.
 
 The application is already functional as a lightweight internal meeting workspace:
 
@@ -15,14 +15,13 @@ The application is already functional as a lightweight internal meeting workspac
 - users can create instant or scheduled meetings
 - users can join a browser-based meeting room
 - users can exchange chat messages in realtime
-- users can stream browser speech recognition transcript lines into Convex
+- users can capture audio chunks via the browser and transcribe them server-side via Groq, streaming the results into Convex
 - users can manually generate and save a meeting summary
 - users can view meetings, basic insights, tasks, organization settings, and notifications
 
 The application is not yet a full production meeting platform. Several areas are still simplified:
 
 - no TURN server, so WebRTC depends on STUN-only connectivity
-- transcription is local browser speech recognition, not server-side meeting audio processing
 - summarization is manual and triggered from the meeting side panel
 - integrations are seeded in the database but there is no dedicated integrations UI
 - some routes and older design-system classes are still transitional
@@ -59,7 +58,8 @@ The application is not yet a full production meeting platform. Several areas are
 
 ### AI
 
-- live transcription uses `window.SpeechRecognition` or `window.webkitSpeechRecognition`
+- live transcription captures audio using the Web Audio API and transcribes it via `POST /api/transcribe`
+- the transcription route uses Groq's Whisper model (`whisper-large-v3`) with multi-language/Hinglish support
 - meeting summarization uses `POST /api/summarize`
 - the summarization route calls Groq's OpenAI-compatible API with model `llama-3.3-70b-versatile`
 
@@ -70,7 +70,8 @@ flowchart TD
     A["Browser UI (Next.js App Router)"] --> B["Clerk"]
     A --> C["Convex React Client"]
     A --> D["Next.js API /api/summarize"]
-    A --> E["Browser APIs: WebRTC + SpeechRecognition"]
+    A --> K["Next.js API /api/transcribe"]
+    A --> E["Browser APIs: WebRTC + Web Audio API"]
 
     C --> F["Convex Queries/Mutations"]
     F --> G["Convex Database Tables"]
@@ -78,6 +79,7 @@ flowchart TD
 
     B --> H
     D --> I["Groq Chat Completions API"]
+    K --> L["Groq Audio Transcriptions API"]
     E --> J["Peer connections between browsers"]
 ```
 
@@ -211,8 +213,8 @@ Main workflow:
 5. peer connections are formed for remote participants
 6. WebRTC signaling events are stored in Convex `signals`
 7. participant state changes are synchronized through Convex mutations
-8. browser speech recognition runs locally while the meeting is active
-9. final transcript lines are saved into Convex
+8. local audio is captured and sent to the server for transcription while the meeting is active
+9. transcribed final lines returned by the API are saved into Convex
 10. side panel shows chat, AI summary, participant list, and transcript
 11. leaving the room ends the meeting if it is not already ended, then routes back to `/meetings`
 
@@ -237,20 +239,23 @@ Workflow:
 
 ### 4.9 Transcription
 
-Transcription is browser-local, not server-side.
+Transcription uses client-side audio capture and server-side processing via Groq.
 
 Workflow:
 
-1. `useTranscription` starts `SpeechRecognition`
-2. interim lines stay in local React state only
-3. final transcript lines are passed to `transcripts.add`
-4. Convex stores transcript rows with speaker metadata
-5. the transcript tab and meeting details page read from `transcripts.list`
+1. `useTranscription` captures raw PCM audio using the Web Audio API.
+2. The captured audio is analyzed for voice activity (VAD).
+3. Voiced audio is encoded into WAV chunks and periodically sent to `/api/transcribe`.
+4. The transcription API supports modes like `auto`, `hinglish`, `hindi`, and `english`.
+5. Transcriptions are generated using Groq's `whisper-large-v3` model.
+6. The frontend receives the transcribed text, and final lines are passed to `transcripts.add`.
+7. Convex stores transcript rows with speaker metadata.
+8. The transcript tab and meeting details page read from `transcripts.list`.
 
 Important current behavior:
 
-- transcription only captures the local browser's speech recognition stream
-- the app does not transcribe mixed room audio or uploaded recordings
+- transcription only captures the local browser's audio stream (microphone); it does not transcribe mixed room audio or uploaded recordings.
+- it works seamlessly across modern browsers (Brave, Chrome, Safari, Firefox), bypassing native Web Speech API restrictions.
 
 ### 4.10 Summarization
 
@@ -633,6 +638,7 @@ app/
     onboarding/page.tsx
   api/
     summarize/route.ts
+    transcribe/route.ts
     webhooks/clerk/
   favicon.ico
   globals.css

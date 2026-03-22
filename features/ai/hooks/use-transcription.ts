@@ -13,11 +13,11 @@ export type TranscriptLine = {
 
 export type TranscriptionMode = "auto" | "hinglish" | "hindi" | "english";
 
-const CHUNK_INTERVAL_MS = 4000;
 const PROCESSOR_BUFFER_SIZE = 4096;
 const VOICE_RMS_THRESHOLD = 0.02;
-const VOICE_HANGOVER_FRAMES = 8;
+const VOICE_HANGOVER_FRAMES = 12; // ~1 second of silence
 const MIN_VOICED_AUDIO_MS = 350;
+const MAX_CHUNK_DURATION_SECONDS = 15;
 
 type AudioContextConstructor = typeof AudioContext;
 
@@ -106,7 +106,6 @@ export function useTranscription({
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
   const sinkGainNodeRef = useRef<GainNode | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunksRef = useRef<Float32Array[]>([]);
   const sampleCountRef = useRef(0);
   const voicedSampleCountRef = useRef(0);
@@ -187,11 +186,6 @@ export function useTranscription({
   }, [sendChunk]);
 
   const stopCapture = useCallback((flushFinalChunk: boolean) => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-
     const processorNode = processorNodeRef.current;
     const sourceNode = sourceNodeRef.current;
     const sinkGainNode = sinkGainNodeRef.current;
@@ -306,6 +300,9 @@ export function useTranscription({
         }
 
         if (!hasVoice && hangoverFramesRef.current <= 0) {
+          if (hasSpeechRef.current) {
+            void flushChunk();
+          }
           return;
         }
 
@@ -313,6 +310,10 @@ export function useTranscription({
         chunk.set(input);
         chunksRef.current.push(chunk);
         sampleCountRef.current += chunk.length;
+
+        if (audioContextRef.current && (sampleCountRef.current / audioContextRef.current.sampleRate) >= MAX_CHUNK_DURATION_SECONDS) {
+          void flushChunk();
+        }
       };
 
       sourceNode.connect(processorNode);
@@ -323,10 +324,6 @@ export function useTranscription({
       sourceNodeRef.current = sourceNode;
       processorNodeRef.current = processorNode;
       sinkGainNodeRef.current = sinkGainNode;
-
-      intervalRef.current = setInterval(() => {
-        void flushChunk();
-      }, CHUNK_INTERVAL_MS);
 
       window.requestAnimationFrame(() => {
         setError(null);

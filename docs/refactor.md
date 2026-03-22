@@ -1,280 +1,252 @@
-# 🚀 Meeting Bot — Transcription & AI Summary Optimization Prompt
+# 🚀 Meeting Bot — Transcription + AI Summary Optimization
 
-You are working on a **Next.js + Convex + WebRTC meeting platform**.
+You are working on a **Next.js + Convex + WebRTC meeting platform** using Groq for transcription (Whisper) and summarization.
 
-The current implementation has:
-- browser-based SpeechRecognition (local only)
-- manual AI summary trigger
-- no batching or pipeline
-- no structured output
-- no speaker-aware processing
+The current system works but has issues with:
+- Hinglish (Hindi + English) transcription accuracy
+- inefficient transcript handling
+- manual summarization
+- lack of structured outputs
 
-Your task is to **redesign transcription and AI summarization into a scalable, production-grade pipeline**.
-
----
-
-# 🧠 1. Core Principle
-
-Follow this architecture:
-
-Audio → Transcription (STT) → Processing → AI Summary (LLM)
-
-Do NOT tightly couple these steps.
+Your task is to **optimize transcription and AI summary into a production-ready pipeline**.
 
 ---
 
-# 🎙️ 2. Transcription System (Redesign)
+# 🎙️ 1. TRANSCRIPTION PIPELINE
 
-## 2.1 Hybrid Model
-
-Implement a 2-layer system:
-
-### Layer 1 — Real-time (Frontend)
-- Use browser SpeechRecognition
-- Purpose:
-  - Live captions
-  - Instant feedback
-
-### Layer 2 — Backend (Accurate)
-- Prepare abstraction for external STT (future-ready)
-- Accept audio/text chunks for processing
+## Goals
+- Improve Hinglish accuracy
+- Reduce hallucination
+- Optimize performance
 
 ---
 
-## 2.2 Chunk-Based Processing (MANDATORY)
+## 1.1 Add Transcription Buffer
 
-DO NOT send transcript line-by-line.
+Do NOT send transcripts line-by-line.
 
-Instead:
+Implement batching:
 
-- Buffer transcript in memory
-- Flush every:
-  - 5–10 seconds OR
-  - sentence completion
-
-Example logic:
-
-
+```
 buffer = []
 
-onFinalTranscript(text):
-buffer.push(text)
+onTranscript(text):
+  buffer.push(text)
 
-every 5 seconds:
-sendBatch(buffer)
-buffer = []
-
+every 5–10 seconds:
+  sendBatch(buffer)
+  buffer = []
+```
 
 ---
 
-## 2.3 Transcript Schema (IMPORTANT)
+## 1.2 Add AI Cleanup Layer (MANDATORY)
 
-Ensure each transcript includes:
+After receiving transcription from Groq Whisper:
 
+- Pass text through Groq LLM for correction
 
+Prompt:
+
+```
+Fix the following transcription which may contain mixed Hindi and English (Hinglish).
+Do not change meaning.
+Do not hallucinate.
+Return clean and accurate text.
+```
+
+---
+
+## 1.3 Improve Hinglish Handling
+
+- Default transcription mode: `auto`
+- If instability detected:
+  - fallback to Hindi-leaning processing
+- Normalize output:
+  - preserve English terms (technical words, names)
+  - correct Hindi words properly
+
+---
+
+## 1.4 Add Confidence Filtering
+
+- Drop or flag low-confidence segments
+- Avoid saving noisy transcripts
+
+---
+
+## 1.5 Add Metadata
+
+Each transcript must include:
+
+```
 {
-meetingId,
-speakerId,
-speakerName,
-text,
-timestamp,
-confidence (optional)
+  meetingId,
+  speakerId,
+  speakerName,
+  text,
+  timestamp
 }
-
-
----
-
-## 2.4 Speaker Awareness (Future Ready)
-
-Design system to support:
-- speaker diarization
-- multiple speakers
-
-Even if initially mocked.
+```
 
 ---
 
-# ⚡ 3. Real-Time Pipeline
+# ⚡ 2. PERFORMANCE OPTIMIZATION
 
-Process data in parallel:
+## 2.1 Batch Convex Writes
+- Combine transcript inserts
+- Avoid high-frequency mutations
 
-Audio
-  → STT
-    → Live UI captions
-    → Buffer storage
-    → Background AI trigger
+## 2.2 Debounce Transcription Calls
+- Prevent API spam
 
-DO NOT block UI for AI processing.
+## 2.3 Avoid Reprocessing
+- Do not send duplicate audio chunks
 
 ---
 
-# 🧾 4. AI Summary System (Redesign)
+# 🧾 3. AI SUMMARY SYSTEM
 
-## 4.1 Incremental Summarization (CRITICAL)
+## Goals
+- Automate summaries
+- Reduce cost
+- Improve structure
 
-DO NOT send full transcript every time.
+---
+
+## 3.1 Incremental Summarization (MANDATORY)
+
+Do NOT send full transcript every time.
 
 Instead:
 
-- Split transcript into chunks
-- Summarize each chunk
-- Merge summaries later
-
-Example:
-
-
+```
 chunkSummary = summarize(last_5_minutes)
 store(chunkSummary)
+```
 
+---
+
+## 3.2 Create summary_chunks Table
+
+```
+{
+  meetingId,
+  chunkIndex,
+  summary,
+  createdAt
+}
+```
+
+---
+
+## 3.3 Final Summary Merge
+
+On meeting end:
+
+```
 finalSummary = merge(all_chunk_summaries)
-
-
----
-
-## 4.2 Structured Output (MANDATORY)
-
-LLM must return JSON:
-
-
-{
-"summary": "...",
-"key_points": [],
-"decisions": [],
-"action_items": [
-{
-"task": "...",
-"assignee": "...",
-"due": null
-}
-]
-}
-
+```
 
 ---
 
-## 4.3 Auto Summary Trigger
+## 3.4 Structured Output (MANDATORY)
 
-Trigger summary:
-- every 5–10 minutes (background)
+Return JSON:
+
+```
+{
+  "summary": "...",
+  "key_points": [],
+  "decisions": [],
+  "action_items": [
+    {
+      "task": "...",
+      "assignee": "...",
+      "due": null
+    }
+  ]
+}
+```
+
+---
+
+## 3.5 Auto Summary Trigger
+
+Trigger:
+- every 5–10 minutes
 - when meeting ends
 
-Also allow manual trigger.
+Allow manual trigger as fallback.
 
 ---
 
-# 🧩 5. Action Item Extraction
+# 🧩 4. ACTION ITEM EXTRACTION
 
 After summary:
 
-- Extract action items
-- Store in `tasks` table
-
-
+```
 tasks.create({
-meetingId,
-title,
-assignee,
-source: "ai"
+  meetingId,
+  title,
+  assignee,
+  source: "ai"
 })
+```
 
-
----
-
-# ⚡ 6. Performance Optimization
-
-## MUST IMPLEMENT:
-
-### 6.1 Debounce AI Calls
-- Never call AI per transcript line
-
-### 6.2 Batch Database Writes
-- Combine transcript inserts
-
-### 6.3 Avoid Reprocessing
-- Cache chunk summaries
+Enhance tasks:
+- add `status: open | completed`
+- add edit/update capability
+- allow assignment
 
 ---
 
-# 🧱 7. Data Model Enhancements
+# 🧠 5. MEETING LIFECYCLE FIX
 
-Add new table:
+Fix scheduled → active transition:
 
-## summary_chunks
-
-
-{
-meetingId,
-chunkIndex,
-summary,
-createdAt
+```
+if (meeting.status === "scheduled" && scheduledFor <= now) {
+  status = "active"
+  startedAt = now
 }
-
-
----
-
-# 🔄 8. Final Pipeline Flow
-
-User speaks
-  ↓
-Browser STT (real-time captions)
-  ↓
-Buffered transcript
-  ↓
-Batch saved to Convex
-  ↓
-Background AI summarization (chunked)
-  ↓
-Final summary on meeting end
-  ↓
-Action items extracted → stored
+```
 
 ---
 
-# 🧪 9. Future-Ready Design
+# ⚡ 6. UX REQUIREMENTS
 
-Ensure system can later integrate:
-
-- Whisper / Deepgram / AssemblyAI
-- full meeting audio processing
-- multi-speaker diarization
-
-Keep STT layer abstracted.
-
----
-
-# 🎯 10. UX Requirements
-
-- Show:
-  - live captions (interim)
-  - finalized transcript
-- Show loading states:
-  - “AI is generating summary…”
+- Show live transcription (real-time)
+- Show cleaned transcript (final)
+- Show AI processing state:
+  - "Generating summary..."
 - Allow:
-  - regenerate summary
-  - edit transcript
+  - manual summary regeneration
+  - transcript editing
 
 ---
 
-# 🔒 11. Safety & Practical Notes
+# 🔒 7. SAFETY
 
-- Add transcription consent notice
+- Add user consent before transcription
 - Allow transcript correction
 - Do not assume AI output is always correct
 
 ---
 
-# ⚠️ Constraints
+# ⚠️ CONSTRAINTS
 
 - Do NOT break existing Convex APIs unnecessarily
 - Maintain feature-based architecture
-- Keep system modular and extensible
+- Keep system modular and scalable
 
 ---
 
-# ✅ Expected Outcome
+# ✅ EXPECTED OUTPUT
 
-- Scalable transcription pipeline
-- Efficient AI summarization (chunked, not brute force)
-- Structured outputs (summary + action items)
-- Optimized performance
-- Production-ready architecture
+- Improved Hinglish transcription accuracy
+- Reduced hallucination via AI cleanup
+- Efficient batching and performance
+- Automated structured summaries
+- Action items extracted automatically
+- Production-ready pipeline

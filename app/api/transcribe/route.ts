@@ -101,14 +101,58 @@ export async function POST(request: Request) {
     const response = await groq.audio.transcriptions.create({
       file,
       model: TRANSCRIPTION_MODEL,
-      response_format: "json",
+      response_format: "verbose_json",
       language: config.language,
       prompt: config.prompt,
-    });
+    }) as unknown as { text: string; segments?: { text: string; no_speech_prob?: number; avg_logprob?: number }[] };
 
-    const text = (response.text ?? "").trim();
+    let text = "";
+    if (response.segments && Array.isArray(response.segments)) {
+      const validSegments = response.segments.filter((seg) => {
+        // Drop noisy/hallucinated segments (1.4 Add Confidence Filtering)
+        if (seg.no_speech_prob && seg.no_speech_prob > 0.5) return false;
+        if (seg.avg_logprob && seg.avg_logprob < -1.0) return false;
+        return true;
+      });
+      text = validSegments.map((seg) => seg.text).join(" ").replace(/\s+/g, " ").trim();
+    } else {
+      text = (response.text ?? "").trim();
+    }
+
     if (isPromptLeak(text, config.prompt)) {
       return NextResponse.json({ text: "" });
+    }
+
+    if (text) {
+      // 1.2 Add AI Cleanup Layer (MANDATORY)
+      try {
+        const cleanupResponse = await groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            {
+              role: "system",
+              content: "You are an AI assistant that cleans up and corrects transcriptions. Fix the following transcription which may contain mixed Hindi and English (Hinglish). Do not change meaning. Do not hallucinate. Return clean and accurate text. Only return the final corrected string, with no quotes, commentary, or extra formatting.",
+            },
+            {
+              role: "user",
+              content: text,
+            },
+          ],
+          temperature: 0.1,
+          max_tokens: 1024,
+        });
+
+        const cleanedText = cleanupResponse.choices[0]?.message?.content?.trim();
+        if (cleanedText) {
+          if (!isPromptLeak(cleanedText, config.prompt)) {
+             text = cleanedText;
+          } else {
+             text = "";
+          }
+        }
+      } catch (cleanupError) {
+        console.error("[transcribe] Cleanup error:", cleanupError);
+      }
     }
 
     return NextResponse.json({ text });
