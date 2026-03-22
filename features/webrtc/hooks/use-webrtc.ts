@@ -446,41 +446,11 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       );
     };
 
-    // ── negotiationneeded: auto-renegotiate when tracks change ──────────
-    connection.onnegotiationneeded = async () => {
-      // Only the offerer (deterministic by ID comparison) should send offers
-      // to avoid glare (simultaneous offers from both sides).
-      if (!participantId || participantId <= remoteParticipantId) {
-        return;
-      }
-
-      console.debug(
-        `${LOG_TAG} negotiationneeded — creating new offer for peer=${remoteParticipantId}`,
-      );
-
-      try {
-        const offer = await connection.createOffer();
-        // Check we haven't moved past stable (e.g. remote offer arrived first)
-        if (connection.signalingState !== "stable") {
-          console.debug(
-            `${LOG_TAG} Skipping renegotiation — signaling state is ${connection.signalingState}`,
-          );
-          return;
-        }
-        await connection.setLocalDescription(offer);
-        await sendSignal({
-          meetingId,
-          receiverParticipantId: remoteParticipantId as Id<"meeting_participants">,
-          kind: "offer",
-          payload: JSON.stringify({ sdp: offer }),
-        });
-      } catch (err) {
-        console.warn(
-          `${LOG_TAG} Auto-renegotiation failed for peer=${remoteParticipantId}:`,
-          err,
-        );
-      }
-    };
+    // NOTE: We intentionally do NOT set onnegotiationneeded here.
+    // addTransceiver() fires negotiationneeded synchronously, which races
+    // with our explicit offer/answer flow and causes "Called in wrong state:
+    // stable" errors. Since we use addTransceiver upfront + replaceTrack
+    // for all track changes, renegotiation is never needed.
 
     // ── Create offer if we are the deterministic offerer ─────────────────
     if (shouldCreateOffer) {
@@ -550,14 +520,30 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
         if (signal.kind === "offer" && payload.sdp) {
           console.debug(
-            `${LOG_TAG} Received OFFER from peer=${signal.senderParticipantId}`,
+            `${LOG_TAG} Received OFFER from peer=${signal.senderParticipantId} signalingState=${connection.signalingState}`,
           );
 
-          // Handle glare: if we're already in "have-local-offer" state,
-          // we need to rollback before accepting the remote offer.
-          if (connection.signalingState === "have-local-offer") {
+          // ── Perfect Negotiation: polite/impolite peer pattern ──────
+          // The "polite" peer (lower participantId) always yields on a
+          // collision. The "impolite" peer (higher ID) ignores the
+          // incoming offer if it collides with its own.
+          const isPolite = Boolean(
+            participantId && participantId < signal.senderParticipantId,
+          );
+          const offerCollision =
+            connection.signalingState !== "stable";
+
+          if (!isPolite && offerCollision) {
             console.debug(
-              `${LOG_TAG} Glare detected — rolling back local offer for peer=${signal.senderParticipantId}`,
+              `${LOG_TAG} Impolite peer ignoring colliding offer from peer=${signal.senderParticipantId}`,
+            );
+            return;
+          }
+
+          // Polite peer yields: rollback its own offer if any.
+          if (offerCollision) {
+            console.debug(
+              `${LOG_TAG} Polite peer rolling back for peer=${signal.senderParticipantId}`,
             );
             await connection.setLocalDescription({ type: "rollback" });
           }
@@ -566,21 +552,28 @@ export function useWebrtc(meetingId: Id<"meetings">) {
             new RTCSessionDescription(payload.sdp),
           );
 
-          // CRITICAL FIX: Drain any ICE candidates that arrived before
-          // the remote description was set.
+          // Drain any ICE candidates that arrived before remote description.
           await drainEarlyIceCandidates(connection, signal.senderParticipantId);
 
-          const answer = await connection.createAnswer();
-          await connection.setLocalDescription(answer);
-          console.debug(
-            `${LOG_TAG} Sending ANSWER to peer=${signal.senderParticipantId}`,
-          );
-          await sendSignal({
-            meetingId,
-            receiverParticipantId: signal.senderParticipantId,
-            kind: "answer",
-            payload: JSON.stringify({ sdp: answer }),
-          });
+          // Guard: only create and set the answer if we're still in the
+          // correct signaling state (have-remote-offer).
+          if (connection.signalingState === "have-remote-offer") {
+            const answer = await connection.createAnswer();
+            await connection.setLocalDescription(answer);
+            console.debug(
+              `${LOG_TAG} Sending ANSWER to peer=${signal.senderParticipantId}`,
+            );
+            await sendSignal({
+              meetingId,
+              receiverParticipantId: signal.senderParticipantId,
+              kind: "answer",
+              payload: JSON.stringify({ sdp: answer }),
+            });
+          } else {
+            console.warn(
+              `${LOG_TAG} Skipping answer — unexpected signalingState=${connection.signalingState} for peer=${signal.senderParticipantId}`,
+            );
+          }
         }
 
         if (signal.kind === "answer" && payload.sdp) {
@@ -670,7 +663,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       .catch((err) => {
         console.error(`${LOG_TAG} Signal processing error:`, err);
       });
-  }, [clearSignals, createPeerConnection, drainEarlyIceCandidates, meetingId, sendSignal, signals]);
+  }, [clearSignals, createPeerConnection, drainEarlyIceCandidates, meetingId, participantId, sendSignal, signals]);
 
   const toggleAudio = async () => {
     // Audio uses enabled-flag toggling intentionally: we need to keep the
