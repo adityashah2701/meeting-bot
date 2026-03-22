@@ -18,10 +18,10 @@ import Link from 'next/link';
 export function NotificationBell() {
   const { organization } = useOrganization();
   const { user } = useUser();
-  const markRead = useMutation(api.notifications.markRead);
+  const markRead = useMutation(api.notifications.index.markRead);
 
   const notifications = useQuery(
-    api.notifications.list,
+    api.notifications.index.list,
     organization?.id ? { orgId: organization.id } : "skip"
   );
 

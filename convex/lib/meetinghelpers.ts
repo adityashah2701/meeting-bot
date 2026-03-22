@@ -11,7 +11,9 @@ export async function getMeetingParticipant(
   return await ctx.db
     .query("meeting_participants")
     .withIndex("by_meetingId_and_userTokenIdentifier", (q) =>
-      q.eq("meetingId", meetingId).eq("userTokenIdentifier", userTokenIdentifier),
+      q
+        .eq("meetingId", meetingId)
+        .eq("userTokenIdentifier", userTokenIdentifier),
     )
     .unique();
 }

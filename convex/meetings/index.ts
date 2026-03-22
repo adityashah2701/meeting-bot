@@ -1,10 +1,10 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { getIdentityName, requireIdentity } from "./lib/auth";
+import { getIdentityName, requireIdentity } from "../lib/auth";
 import {
   listActiveParticipants,
   getMeetingDuration,
-} from "./lib/meetinghelpers";
+} from "../lib/meetinghelpers";
 
 export const create = mutation({
   args: {

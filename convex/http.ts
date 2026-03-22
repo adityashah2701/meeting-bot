@@ -55,7 +55,7 @@ http.route({
       switch (evt.type) {
         case "user.created":
         case "user.updated":
-          await ctx.runMutation(internal.users.upsertUser, {
+          await ctx.runMutation(internal.users.index.upsertUser, {
             clerkId: id,
             email: attributes.email_addresses?.[0]?.email_address || "",
             firstName: attributes.first_name,
@@ -64,11 +64,11 @@ http.route({
           });
           break;
         case "user.deleted":
-          await ctx.runMutation(internal.users.deleteUser, { clerkId: id });
+          await ctx.runMutation(internal.users.index.deleteUser, { clerkId: id });
           break;
         case "organization.created":
         case "organization.updated":
-          await ctx.runMutation(internal.users.upsertOrganization, {
+          await ctx.runMutation(internal.users.index.upsertOrganization, {
             clerkId: id,
             name: attributes.name ?? "Organization",
             slug: attributes.slug ?? id,
@@ -76,22 +76,30 @@ http.route({
           });
           break;
         case "organization.deleted":
-          await ctx.runMutation(internal.users.deleteOrganization, { clerkId: id });
+          await ctx.runMutation(internal.users.index.deleteOrganization, {
+            clerkId: id,
+          });
           break;
         case "organizationMembership.created":
-          if (!attributes.public_user_data?.user_id || !attributes.organization?.id) {
+          if (
+            !attributes.public_user_data?.user_id ||
+            !attributes.organization?.id
+          ) {
             break;
           }
-          await ctx.runMutation(internal.users.addOrganizationMembership, {
+          await ctx.runMutation(internal.users.index.addOrganizationMembership, {
             userClerkId: attributes.public_user_data.user_id,
             orgClerkId: attributes.organization.id,
           });
           break;
         case "organizationMembership.deleted":
-          if (!attributes.public_user_data?.user_id || !attributes.organization?.id) {
+          if (
+            !attributes.public_user_data?.user_id ||
+            !attributes.organization?.id
+          ) {
             break;
           }
-          await ctx.runMutation(internal.users.removeOrganizationMembership, {
+          await ctx.runMutation(internal.users.index.removeOrganizationMembership, {
             userClerkId: attributes.public_user_data.user_id,
             orgClerkId: attributes.organization.id,
           });
@@ -100,7 +108,8 @@ http.route({
 
       return new Response(null, { status: 200 });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown webhook error";
+      const message =
+        err instanceof Error ? err.message : "Unknown webhook error";
       console.error("Webhook Error:", err);
       return new Response(`Webhook Error: ${message}`, { status: 400 });
     }

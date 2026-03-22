@@ -1,6 +1,6 @@
 import { api } from "@/convex/_generated/api";
 
 export const organizationService = {
-  ensureIntegrations: api.organization.ensureIntegrations,
-  listIntegrations: api.organization.listIntegrations,
+  ensureIntegrations: api.organization.index.ensureIntegrations,
+  listIntegrations: api.organization.index.listIntegrations,
 };

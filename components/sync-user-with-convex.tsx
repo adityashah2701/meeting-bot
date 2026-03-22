@@ -14,7 +14,7 @@ export function SyncUserWithConvex() {
     },
   });
 
-  const syncUser = useMutation(api.users.syncUser);
+  const syncUser = useMutation(api.users.index.syncUser);
 
   useEffect(() => {
     if (isAuthenticated && user && isOrgsLoaded && userMemberships.data) {

@@ -1,6 +1,6 @@
-import { internalMutation, mutation } from "./_generated/server";
+import { internalMutation, mutation } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "./lib/auth";
+import { requireIdentity } from "../lib/auth";
 
 export const upsertUser = internalMutation({
   args: {
@@ -11,8 +11,11 @@ export const upsertUser = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.query("users").withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId)).first();
-    
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .first();
+
     if (user) {
       // Keep existing orgIds
       await ctx.db.patch(user._id, {
@@ -25,7 +28,9 @@ export const upsertUser = internalMutation({
       await ctx.db.insert("users", {
         tokenIdentifier: args.clerkId,
         ...args,
-        fullName: [args.firstName, args.lastName].filter(Boolean).join(" ") || undefined,
+        fullName:
+          [args.firstName, args.lastName].filter(Boolean).join(" ") ||
+          undefined,
         orgIds: [],
       });
     }
@@ -37,7 +42,10 @@ export const deleteUser = internalMutation({
     clerkId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.query("users").withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId)).first();
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .first();
     if (user) {
       await ctx.db.delete(user._id);
     }
@@ -52,8 +60,11 @@ export const upsertOrganization = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const org = await ctx.db.query("organizations").withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId)).first();
-    
+    const org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .first();
+
     if (org) {
       await ctx.db.patch(org._id, {
         name: args.name,
@@ -69,7 +80,10 @@ export const upsertOrganization = internalMutation({
 export const deleteOrganization = internalMutation({
   args: { clerkId: v.string() },
   handler: async (ctx, args) => {
-    const org = await ctx.db.query("organizations").withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId)).first();
+    const org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .first();
     if (org) {
       await ctx.db.delete(org._id);
     }
@@ -82,7 +96,10 @@ export const addOrganizationMembership = internalMutation({
     orgClerkId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.query("users").withIndex("by_clerkId", (q) => q.eq("clerkId", args.userClerkId)).first();
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.userClerkId))
+      .first();
     if (user && !user.orgIds.includes(args.orgClerkId)) {
       await ctx.db.patch(user._id, {
         orgIds: [...user.orgIds, args.orgClerkId],
@@ -97,7 +114,10 @@ export const removeOrganizationMembership = internalMutation({
     orgClerkId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.query("users").withIndex("by_clerkId", (q) => q.eq("clerkId", args.userClerkId)).first();
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.userClerkId))
+      .first();
     if (user) {
       await ctx.db.patch(user._id, {
         orgIds: user.orgIds.filter((id) => id !== args.orgClerkId),
@@ -117,7 +137,9 @@ export const syncUser = mutation({
 
     const user = await ctx.db
       .query("users")
-      .withIndex("by_tokenIdentifier", (q) => q.eq("tokenIdentifier", tokenIdentifier))
+      .withIndex("by_tokenIdentifier", (q) =>
+        q.eq("tokenIdentifier", tokenIdentifier),
+      )
       .first();
 
     if (user) {

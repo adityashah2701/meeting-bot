@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { query } from "../_generated/server";
 import { v } from "convex/values";
 
 export const get = query({
@@ -12,8 +12,12 @@ export const get = query({
       .order("desc")
       .take(50);
 
-    const activeCount = meetings.filter((meeting) => meeting.status === "active").length;
-    const endedCount = meetings.filter((meeting) => meeting.status === "ended").length;
+    const activeCount = meetings.filter(
+      (meeting) => meeting.status === "active",
+    ).length;
+    const endedCount = meetings.filter(
+      (meeting) => meeting.status === "ended",
+    ).length;
 
     return {
       totals: {
