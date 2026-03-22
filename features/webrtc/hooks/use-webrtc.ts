@@ -5,6 +5,12 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { meetingService } from "@/features/meeting/services/meeting-service";
+import {
+  acquireCameraStream,
+  createToggleToken,
+  replaceOutgoingVideoTrack,
+  stopAllVideoTracks,
+} from "@/features/webrtc/services/camera-track-manager";
 
 type SignalPayload = {
   sdp?: RTCSessionDescriptionInit;
@@ -50,6 +56,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
   const [participantId, setParticipantId] = useState<Id<"meeting_participants"> | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  // cameraStream is the reactive state version of cameraStreamRef, used by
+  // the local VideoTile to display the camera feed. localStream is audio-only
+  // and is used by the transcription hook.
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [presentationStream, setPresentationStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [isAudioMuted, setIsAudioMuted] = useState(false);
@@ -59,12 +69,21 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const processedSignalIdsRef = useRef<Set<string>>(new Set());
+  // localStreamRef holds the audio-only stream used for mic capture.
+  // It is separate from cameraStreamRef so that toggling the camera does
+  // not interrupt microphone capture or require re-negotiation of audio.
   const localStreamRef = useRef<MediaStream | null>(null);
+  // cameraStreamRef holds the camera-only stream currently active.
+  // It is null when the camera is off, meaning no hardware lock is held.
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamsRef = useRef<Record<string, MediaStream>>({});
   const presentationStreamRef = useRef<MediaStream | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  // Debounce rapid camera toggling. Each toggle call stores a fresh symbol;
+  // async continuations check whether their token is still current before
+  // applying side-effects, discarding stale calls.
+  const cameraToggleTokenRef = useRef<symbol>(createToggleToken());
 
   const participantRows = useQuery(meetingService.listParticipants, { meetingId });
   const signalRows = useQuery(
@@ -140,15 +159,21 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   }, [meetingId, participantId, sendSignal]);
 
   useEffect(() => {
-    // This effect runs exactly once. The localStreamRef guard prevents re-runs
-    // if React ever calls the effect again (e.g. StrictMode double-invoke).
+    // ── ONE-TIME MEDIA SETUP ──────────────────────────────────────────────
+    // We acquire AUDIO ONLY here. The camera starts OFF so the hardware LED
+    // is never lit until the user explicitly enables video. This avoids the
+    // privacy issue where the camera LED stays on even with "camera off".
+    //
+    // When the user turns the camera on, toggleVideo() calls getUserMedia for
+    // video-only and attaches the resulting track to the peer connections.
     const setup = async () => {
       if (localStreamRef.current) {
+        // Guard against React StrictMode double-invoke.
         return;
       }
 
-      // Check existing permission state — prompt only when necessary.
-      // If already denied, show actionable error immediately.
+      // Pre-flight: check mic permission before prompting, so we can show a
+      // clear error message rather than a confusing empty prompt.
       try {
         if (navigator.permissions) {
           const micPerm = await navigator.permissions.query({ name: "microphone" as PermissionName });
@@ -162,23 +187,23 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           }
         }
       } catch {
-        // permissions API not available — fall through to getUserMedia which will prompt
+        // Permissions API not available — fall through and let getUserMedia prompt.
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+        // Request audio-only. Camera is NOT acquired here.
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          video: false,
           audio: true,
         });
+
         setPermissionDenied(false);
-        cameraStreamRef.current = stream;
-        // Default camera to off — disable video tracks immediately
-        stream.getVideoTracks().forEach((track) => {
-          track.enabled = false;
-        });
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        // Sync the disabled state to the server
+        localStreamRef.current = audioStream;
+        // Expose the audio-only stream so the transcription hook can attach
+        // its AudioContext analyser to the microphone track.
+        setLocalStream(audioStream);
+
+        // Camera starts off — no video track acquired, no LED lit.
         void updateMediaState({
           meetingId,
           isMicEnabled: true,
@@ -192,17 +217,17 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         if (isDenied) {
           setPermissionDenied(true);
           toast.error(
-            "Camera/microphone access denied. Allow permissions in your browser's site settings and refresh.",
+            "Microphone access denied. Allow mic permissions in your browser's site settings and refresh.",
             { duration: 10000 },
           );
         } else {
-          toast.error("Camera or microphone access is required");
+          toast.error("Microphone access is required to join the meeting");
         }
       }
     };
 
     void setup();
-    // Run once on mount — meetingId and updateMediaState are stable at join time.
+    // Intentionally run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -210,15 +235,25 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     const peerConnectionsRef = peersRef;
     const remoteMediaRef = remoteStreamsRef;
     const sharedPresentationRef = presentationStreamRef;
-    const activeLocalStreamRef = localStreamRef;
+    const activeLocalStreamRef = localStreamRef; // audio-only stream
+    const activeCameraStreamRef = cameraStreamRef; // camera stream (may be null)
 
     return () => {
+      // Close all peer connections first so they stop requesting frames.
       Object.values(peerConnectionsRef.current).forEach((connection) => connection.close());
+      // Stop all remote streams.
       Object.values(remoteMediaRef.current).forEach((stream) => {
         stream.getTracks().forEach((track) => track.stop());
       });
+      // Stop screen share track.
       sharedPresentationRef.current?.getTracks().forEach((track) => track.stop());
+      // Stop the audio-only local stream.
       activeLocalStreamRef.current?.getTracks().forEach((track) => track.stop());
+      // Stop the camera stream separately — this is the critical call that
+      // turns the camera LED off if the user leaves while the camera is on.
+      stopAllVideoTracks(activeCameraStreamRef.current);
+      activeCameraStreamRef.current = null;
+
       leaveMeeting({ meetingId }).catch(() => undefined);
     };
   }, [leaveMeeting, meetingId]);
@@ -236,20 +271,8 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     });
   };
 
-  const replaceOutgoingVideoTrack = async (track: MediaStreamTrack) => {
-    const peers = Object.values(peersRef.current);
-    await Promise.all(
-      peers.map(async (connection) => {
-        const sender = connection
-          .getSenders()
-          .find((item) => item.track?.kind === "video");
-
-        if (sender) {
-          await sender.replaceTrack(track);
-        }
-      }),
-    );
-  };
+  // replaceOutgoingVideoTrack is now delegated to the camera-track-manager
+  // service for consistency and testability.
 
   const createPeerConnection = useCallback(async (
     remoteParticipantId: string,
@@ -262,9 +285,20 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     const connection = new RTCPeerConnection(buildRtcConfig());
     peersRef.current[remoteParticipantId] = connection;
 
-    localStreamRef.current?.getTracks().forEach((track) => {
+    // Add audio tracks from the audio-only stream.
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
       connection.addTrack(track, localStreamRef.current as MediaStream);
     });
+
+    // If the camera is currently on, add its video track too.
+    // This handles the case where a new peer joins after the local user has
+    // already enabled their camera.
+    if (cameraStreamRef.current) {
+      const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
+      if (videoTrack && videoTrack.readyState === "live") {
+        connection.addTrack(videoTrack, cameraStreamRef.current);
+      }
+    }
 
     connection.ontrack = (event) => {
       const stream = event.streams[0];
@@ -404,21 +438,95 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   }, [clearSignals, createPeerConnection, meetingId, sendSignal, signals]);
 
   const toggleAudio = async () => {
-    const nextValue = !isAudioMuted;
+    // Audio uses enabled-flag toggling intentionally: we need to keep the
+    // audio track alive for WebRTC signaling continuity across all peers.
+    // Stopping and restarting the audio track would require a full
+    // renegotiation and could break the transcription pipeline.
+    const nextMuted = !isAudioMuted;
     localStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = !nextValue;
+      track.enabled = !nextMuted;
     });
-    setIsAudioMuted(nextValue);
-    await syncMediaState({ audio: !nextValue });
+    setIsAudioMuted(nextMuted);
+    await syncMediaState({ audio: !nextMuted });
   };
 
   const toggleVideo = async () => {
-    const nextValue = !isVideoOff;
-    localStreamRef.current?.getVideoTracks().forEach((track) => {
-      track.enabled = !nextValue;
-    });
-    setIsVideoOff(nextValue);
-    await syncMediaState({ video: !nextValue });
+    // ── CAMERA OFF ───────────────────────────────────────────────────────
+    // When turning the camera OFF:
+    //   1. Stop every video track on the camera stream → releases hardware
+    //   2. Camera LED turns off at OS level
+    //   3. Null-out the cameraStreamRef so we don't hold stale references
+    //   4. Replace the outgoing track on all peer connections with null so
+    //      remote participants see the video as ended
+    //
+    // WHY NOT track.enabled = false?
+    //   It only mutes the data in software. The browser still holds the
+    //   camera device open, keeping the LED lit — a privacy issue.
+    //
+    // ── CAMERA ON ────────────────────────────────────────────────────────
+    // When turning the camera ON:
+    //   1. Call getUserMedia({ video: true, audio: false }) to re-acquire
+    //      the camera at the OS level
+    //   2. Store the new stream in cameraStreamRef
+    //   3. Replace the outgoing video sender on every RTCPeerConnection
+    //      via replaceTrack (no full renegotiation needed in most browsers)
+    //
+    // A debounce token prevents race conditions from rapid toggling.
+
+    // Mint a new toggle token for this invocation.
+    const token = createToggleToken();
+    cameraToggleTokenRef.current = token;
+
+    if (!isVideoOff) {
+      // ── TURNING OFF ──────────────────────────────────────────────────
+      // Stop the hardware first, then update all peers and UI state.
+      stopAllVideoTracks(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+      setCameraStream(null);
+
+      // Signal peers with a null track — they will see the video as ended.
+      await replaceOutgoingVideoTrack(peersRef.current, null);
+
+      setIsVideoOff(true);
+      await syncMediaState({ video: false });
+    } else {
+      // ── TURNING ON ───────────────────────────────────────────────────
+      const result = await acquireCameraStream();
+
+      // If the user toggled again while we were waiting for getUserMedia,
+      // discard this stale result and do nothing.
+      if (cameraToggleTokenRef.current !== token) {
+        if (result) stopAllVideoTracks(result.stream);
+        return;
+      }
+
+      if (!result) {
+        toast.error("Could not access camera. Check your browser permissions.");
+        return;
+      }
+
+      const { stream, videoTrack } = result;
+
+      // Guard: if the track died between getUserMedia resolving and now.
+      if (videoTrack.readyState !== "live") {
+        stopAllVideoTracks(stream);
+        toast.error("Camera track failed to start — please try again.");
+        return;
+      }
+
+      cameraStreamRef.current = stream;
+      setCameraStream(stream);
+
+      // Replace the outgoing video track on every peer connection.
+      // replaceTrack avoids a full SDP renegotiation in Chrome, Edge, and
+      // Safari 15+. For peers that have no video sender yet (joined before
+      // this user's camera was ever on), the sender was already added in
+      // createPeerConnection, so replaceTrack will find it.
+      await replaceOutgoingVideoTrack(peersRef.current, videoTrack);
+
+      setIsVideoOff(false);
+      await syncMediaState({ video: true });
+    }
   };
 
   const startScreenShare = async () => {
@@ -437,7 +545,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         void stopScreenShare();
       };
 
-      await replaceOutgoingVideoTrack(screenTrack);
+      await replaceOutgoingVideoTrack(peersRef.current, screenTrack);
       setPresentationStream(stream);
       setIsScreenSharing(true);
       await syncMediaState({ screen: true, video: true });
@@ -450,20 +558,27 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     screenTrackRef.current?.stop();
     screenTrackRef.current = null;
 
-    const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0];
-    if (!cameraTrack) {
-      return;
-    }
+    // After stopping the screen share, restore the camera track if one is
+    // active. If the camera was off when the screen share started, we restore
+    // it to null, which the service handles gracefully.
+    const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0] ?? null;
+    const isRestoredCameraLive = cameraTrack?.readyState === "live";
 
-    await replaceOutgoingVideoTrack(cameraTrack);
+    await replaceOutgoingVideoTrack(peersRef.current, cameraTrack);
     setPresentationStream(null);
     setIsScreenSharing(false);
-    await syncMediaState({ screen: false, video: true });
+
+    // If there is no live camera track to restore, mark camera as off.
+    await syncMediaState({ screen: false, video: isRestoredCameraLive });
+    if (!isRestoredCameraLive) {
+      setIsVideoOff(true);
+    }
   };
 
   return {
     participantId,
     localStream,
+    cameraStream,
     presentationStream,
     remoteStreams,
     participants,

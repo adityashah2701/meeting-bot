@@ -28,12 +28,16 @@ function getTileMaxWidth(count: number) {
 
 export function ParticipantGrid({
   localStream,
+  cameraStream,
   presentationStream,
   remoteStreams,
   participants,
   localParticipantId,
 }: {
+  /** Audio-only stream from the local mic — used exclusively for the speaking indicator. */
   localStream: MediaStream | null;
+  /** Camera-only stream for the local video tile display. Null when camera is off. */
+  cameraStream: MediaStream | null;
   presentationStream: MediaStream | null;
   remoteStreams: Record<string, MediaStream>;
   participants: Participant[];
@@ -76,7 +80,8 @@ export function ParticipantGrid({
             <AspectRatio ratio={16 / 9}>
               <VideoTile
                 className="h-full rounded-lg"
-                stream={localStream}
+                stream={cameraStream}
+                audioStream={localStream}
                 name={localParticipant.name}
                 imageUrl={localParticipant.imageUrl}
                 isLocal
@@ -120,7 +125,8 @@ export function ParticipantGrid({
             <AspectRatio ratio={16 / 9}>
               <VideoTile
                 className="h-full rounded-xl"
-                stream={isLocal ? localStream : (remoteStreams[p._id] ?? null)}
+                stream={isLocal ? cameraStream : (remoteStreams[p._id] ?? null)}
+                audioStream={isLocal ? localStream : undefined}
                 name={p.name}
                 imageUrl={p.imageUrl}
                 isLocal={isLocal}

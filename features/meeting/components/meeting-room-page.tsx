@@ -70,12 +70,13 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const dbTranscript = useMemo(() => transcriptRows ?? [], [transcriptRows]);
   const transcriptQueueRef = useRef<Array<{ text: string; timestamp: number }>>([]);
   const transcriptRef = useRef<TranscriptLine[]>([]);
-  const meetingRef = useRef(meeting);
+  const meetingRef = useRef<typeof meeting | null>(null);
   meetingRef.current = meeting ?? null;
 
   const {
     participantId,
     localStream,
+    cameraStream,
     presentationStream,
     remoteStreams,
     participants,
@@ -292,6 +293,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
           <div className="h-full min-h-0">
             <ParticipantGrid
               localStream={localStream}
+              cameraStream={cameraStream}
               presentationStream={presentationStream}
               remoteStreams={remoteStreams}
               participants={participants}

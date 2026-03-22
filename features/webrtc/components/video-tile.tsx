@@ -9,6 +9,7 @@ import { useAudioActivity } from "@/features/webrtc/hooks/use-audio-activity";
 export function VideoTile({
   className,
   stream,
+  audioStream,
   name,
   imageUrl,
   isLocal = false,
@@ -19,6 +20,10 @@ export function VideoTile({
 }: {
   className?: string;
   stream: MediaStream | null;
+  /** Optional separate stream used only for the speaking-activity indicator.
+   *  Pass the audio-only stream for the local tile so the mic LED still works
+   *  when the camera stream has no audio tracks. */
+  audioStream?: MediaStream | null;
   name: string;
   imageUrl?: string;
   isLocal?: boolean;
@@ -28,7 +33,9 @@ export function VideoTile({
   isPresentation?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const isSpeaking = useAudioActivity(stream);
+  // Use dedicated audioStream for speaking detection when provided
+  // (local tile sends audio-only stream; remote tiles carry both).
+  const isSpeaking = useAudioActivity(audioStream ?? stream);
   const initials = name
     .split(" ")
     .filter(Boolean)
@@ -37,9 +44,8 @@ export function VideoTile({
     .join("");
 
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream;
-    }
+    if (!videoRef.current) return;
+    videoRef.current.srcObject = stream;
   }, [stream]);
 
   return (
@@ -50,7 +56,7 @@ export function VideoTile({
         className,
       )}
     >
-      {stream && (isCameraEnabled || isPresentation) ? (
+      {stream && (isCameraEnabled || isPresentation || isLocal) ? (
         <video
           ref={videoRef}
           autoPlay
