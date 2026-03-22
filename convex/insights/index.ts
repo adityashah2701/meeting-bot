@@ -1,11 +1,14 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
+import { assertOrgAccess, requireIdentity } from "../lib/auth";
 
 export const get = query({
   args: {
     orgId: v.string(),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     const meetings = await ctx.db
       .query("meetings")
       .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))

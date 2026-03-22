@@ -1,6 +1,12 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { getIdentityName, requireIdentity } from "../lib/auth";
+import {
+  assertMeetingAccess,
+  assertMeetingHost,
+  assertOrgAccess,
+  getIdentityName,
+  requireIdentity,
+} from "../lib/auth";
 import {
   listActiveParticipants,
   getMeetingDuration,
@@ -16,6 +22,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     const now = Date.now();
     const isScheduled =
       typeof args.scheduledFor === "number" && args.scheduledFor > now;
@@ -57,10 +64,12 @@ export const create = mutation({
 export const get = query({
   args: { meetingId: v.id("meetings") },
   handler: async (ctx, args) => {
-    const meeting = await ctx.db.get(args.meetingId);
-    if (!meeting) {
-      return null;
-    }
+    const identity = await requireIdentity(ctx);
+    const meeting = await assertMeetingAccess(
+      ctx,
+      identity.tokenIdentifier,
+      args.meetingId,
+    );
 
     const participants = await listActiveParticipants(ctx, args.meetingId);
     const latestSummary = await ctx.db
@@ -85,7 +94,13 @@ export const get = query({
 export const endMeeting = mutation({
   args: { meetingId: v.id("meetings") },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
+    const meeting = await assertMeetingAccess(
+      ctx,
+      identity.tokenIdentifier,
+      args.meetingId,
+    );
+    assertMeetingHost(identity, meeting);
     await ctx.db.patch(args.meetingId, {
       status: "ended",
       endedAt: Date.now(),
@@ -97,6 +112,8 @@ export const endMeeting = mutation({
 export const getSummary = query({
   args: { meetingId: v.id("meetings") },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     return await ctx.db
       .query("meeting_assets")
       .withIndex("by_meetingId_and_type", (q) =>
@@ -123,7 +140,8 @@ export const saveSummary = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const existing = await ctx.db
       .query("meeting_assets")
       .withIndex("by_meetingId_and_type", (q) =>
@@ -156,6 +174,8 @@ export const saveSummary = mutation({
 export const getByOrg = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     const meetings = await ctx.db
       .query("meetings")
       .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
@@ -169,6 +189,8 @@ export const getByOrg = query({
 export const getDashboardFeed = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     const meetings = await ctx.db
       .query("meetings")
       .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))

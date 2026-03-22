@@ -1,8 +1,12 @@
 import Groq from "groq-sdk";
 import { NextResponse } from "next/server";
+import { getClientIp, isRateLimited } from "@/lib/rate-limit";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const TRANSCRIPTION_MODEL = "whisper-large-v3";
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+const TRANSCRIBE_RATE_LIMIT = 90;
+const TRANSCRIBE_RATE_WINDOW_MS = 60_000;
 const PROMPT_LEAK_SNIPPETS = [
   "the speaker may use more than one language",
   "do not translate paraphrase or normalize into a single language",
@@ -80,12 +84,32 @@ function getFileExtension(file: File) {
 
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
+    if (
+      isRateLimited(
+        `transcribe:${ip}`,
+        TRANSCRIBE_RATE_LIMIT,
+        TRANSCRIBE_RATE_WINDOW_MS,
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Too many transcription requests", text: "" },
+        { status: 429 },
+      );
+    }
+
     const formData = await request.formData();
     const audioBlob = formData.get("audio") as File | null;
     const transcriptionMode = formData.get("mode");
 
     if (!audioBlob || audioBlob.size === 0) {
       return NextResponse.json({ text: "" });
+    }
+    if (audioBlob.size > MAX_AUDIO_BYTES) {
+      return NextResponse.json(
+        { error: "Audio chunk too large", text: "" },
+        { status: 413 },
+      );
     }
 
     const extension = getFileExtension(audioBlob);
@@ -95,7 +119,9 @@ export async function POST(request: Request) {
       { type: audioBlob.type || `audio/${extension}` },
     );
     const config = getTranscriptionConfig(
-      typeof transcriptionMode === "string" ? transcriptionMode : null,
+      typeof transcriptionMode === "string"
+        ? transcriptionMode.trim().toLowerCase()
+        : null,
     );
 
     const response = await groq.audio.transcriptions.create({

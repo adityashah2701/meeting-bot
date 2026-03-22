@@ -1,6 +1,6 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, assertOrgAccess, requireIdentity } from "../lib/auth";
 
 export const list = query({
   args: {
@@ -10,6 +10,8 @@ export const list = query({
     ),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     const status = args.status ?? "open";
     return await ctx.db
       .query("tasks")
@@ -30,7 +32,8 @@ export const create = mutation({
     dueAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     return await ctx.db.insert("tasks", {
       ...args,
       status: "open",
@@ -47,7 +50,9 @@ export const createFromSummary = mutation({
     titles: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
 
     const normalizedTitles = args.titles
       .map((title) => title.trim())

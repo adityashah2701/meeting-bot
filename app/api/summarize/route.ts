@@ -1,5 +1,6 @@
 import Groq from "groq-sdk";
 import { NextResponse } from "next/server";
+import { getClientIp, isRateLimited } from "@/lib/rate-limit";
 
 type TranscriptInput = {
   sender: string;
@@ -23,6 +24,15 @@ export type SummaryPayload = {
 
 const SUMMARY_MODEL = "llama-3.3-70b-versatile";
 const REQUEST_TIMEOUT_MS = 20_000;
+const SUMMARY_RATE_LIMIT = 30;
+const SUMMARY_RATE_WINDOW_MS = 60_000;
+
+function sanitizeInput(value: string) {
+  return value
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function parseJsonPayload(content: string | null | undefined): SummaryPayload | null {
   if (!content) return null;
@@ -64,6 +74,20 @@ function parseJsonPayload(content: string | null | undefined): SummaryPayload | 
 }
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req);
+  if (
+    isRateLimited(
+      `summarize:${ip}`,
+      SUMMARY_RATE_LIMIT,
+      SUMMARY_RATE_WINDOW_MS,
+    )
+  ) {
+    return NextResponse.json(
+      { error: "Too many summary requests. Please retry in a minute." },
+      { status: 429 },
+    );
+  }
+
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "GROQ_API_KEY is not configured" }, { status: 500 });
@@ -78,14 +102,20 @@ export async function POST(req: Request) {
   }
 
   const normalized = transcript
-    .map((e) => ({ sender: e.sender?.trim(), text: e.text?.trim() }))
+    .map((e) => ({
+      sender: sanitizeInput(e.sender ?? ""),
+      text: sanitizeInput(e.text ?? ""),
+    }))
     .filter((e) => e.sender && e.text);
 
   if (normalized.length === 0) {
     return NextResponse.json({ error: "No transcript provided" }, { status: 400 });
   }
 
-  const formattedTranscript = normalized.map((e) => `${e.sender}: ${e.text}`).join("\n");
+  const formattedTranscript = normalized
+    .slice(0, 500)
+    .map((e) => `${e.sender}: ${e.text}`)
+    .join("\n");
 
   const groq = new Groq({ apiKey, maxRetries: 0, timeout: REQUEST_TIMEOUT_MS });
 

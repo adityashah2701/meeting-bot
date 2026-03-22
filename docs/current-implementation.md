@@ -2,29 +2,28 @@
 
 Snapshot date: 2026-03-22
 
-This document describes the current codebase as implemented today. It focuses on what is actually wired up in code, how the main workflows behave, how the folders are organized, what the architecture looks like, and where the current gaps or placeholders are.
+This document describes what is actually implemented in the current codebase. It is based on the source currently present in `app/`, `features/`, `components/`, and `convex/`, not on older architectural plans.
 
 ## 1. Executive Summary
 
-Meeting Bot is a Next.js 16 + React 19 application that uses Clerk for authentication and organizations, Convex for the backend/database/realtime layer, browser-native WebRTC for live media, browser Web Audio API for audio capture, and Next.js API routes for AI summarization and transcription via Groq.
+Meeting Bot is a Next.js 16 + React 19 application that uses Clerk for auth and organizations, Convex for backend/database/realtime state, WebRTC for live media, browser Web Audio APIs for microphone capture, and Next.js API routes for AI transcription and summarization through Groq.
 
-The application is already functional as a lightweight internal meeting workspace:
+Today the app already supports a real end-to-end meeting workflow:
 
-- users can sign in with Clerk
-- users can create or join organizations
-- users can create instant or scheduled meetings
-- users can join a browser-based meeting room
-- users can exchange chat messages in realtime
-- users can capture audio chunks via the browser and transcribe them server-side via Groq, streaming the results into Convex
-- users can manually generate and save a meeting summary
-- users can view meetings, basic insights, tasks, organization settings, and notifications
+- Clerk sign-in and sign-up
+- organization onboarding with Clerk organization creation
+- Convex-backed user and organization sync
+- instant and scheduled meeting creation
+- meeting archive and dashboard views
+- live meeting room with WebRTC participant media
+- Convex-backed chat, participant presence, and signaling
+- local microphone capture -> transcription API -> Convex transcript persistence
+- AI summary generation with structured key points, decisions, and action items
+- automatic task creation from generated summary action items
+- meeting details page for ended meetings
+- notifications, simple insights, and simple tasks
 
-The application is not yet a full production meeting platform. Several areas are still simplified:
-
-- no TURN server, so WebRTC depends on STUN-only connectivity
-- summarization is manual and triggered from the meeting side panel
-- integrations are seeded in the database but there is no dedicated integrations UI
-- some routes and older design-system classes are still transitional
+This is still a prototype / early product implementation, not a hardened production system. The main limitations right now are around security hardening, meeting lifecycle rules, TURN-less WebRTC, and incomplete integrations/task workflows.
 
 ## 2. Stack and Runtime Model
 
@@ -32,36 +31,39 @@ The application is not yet a full production meeting platform. Several areas are
 
 - Next.js `16.2.1` with App Router
 - React `19.2.4`
-- TypeScript strict mode
-- Tailwind CSS v4 with CSS variables
-- shadcn/ui style config: `radix-lyra`
-- Lucide icons
+- TypeScript with `strict: true`
+- Tailwind CSS v4
+- shadcn/ui style component set plus custom shared components
 - Sonner for toast notifications
+- Lucide React icons
 
-### Authentication and Multi-tenancy
+### Authentication and Tenancy
 
-- Clerk for sign-in, sign-up, user profile, organization profile, organization creation, and organization switching
-- Convex uses Clerk JWT auth via `convex/auth.config.ts`
-- the active Clerk organization ID is used as the tenant boundary for most frontend queries
+- Clerk is used for:
+  - sign-in and sign-up
+  - user profile
+  - organization profile
+  - organization creation and switching
+- Convex is configured to trust Clerk JWTs through `convex/auth.config.ts`
+- the active Clerk organization ID is used by most frontend pages as the workspace/org boundary
 
 ### Backend and Realtime
 
-- Convex queries and mutations provide the app API
-- Convex tables store meetings, participants, transcripts, messages, tasks, notifications, integrations, summaries, organizations, and users
-- Convex queries are consumed in the UI through `useQuery`, so the app updates reactively
+- Convex queries and mutations are the main app API
+- Convex stores meetings, participants, messages, transcripts, meeting assets, notifications, tasks, integrations, summary chunks, organizations, and users
+- the frontend subscribes to Convex with `useQuery`, so many views update reactively
 
 ### Realtime Media
 
-- WebRTC peer-to-peer media is handled in `features/webrtc/hooks/use-webrtc.ts`
-- signaling is stored and delivered through Convex `signals`
-- ICE config currently uses only Google's public STUN server
+- browser-to-browser media is handled by `features/webrtc/hooks/use-webrtc.ts`
+- signaling is stored in the Convex `signals` table
+- the current ICE config is STUN-only using `stun:stun.l.google.com:19302`
 
 ### AI
 
-- live transcription captures audio using the Web Audio API and transcribes it via `POST /api/transcribe`
-- the transcription route uses Groq's Whisper model (`whisper-large-v3`) with multi-language/Hinglish support
-- meeting summarization uses `POST /api/summarize`
-- the summarization route calls Groq's OpenAI-compatible API with model `llama-3.3-70b-versatile`
+- `POST /api/transcribe` sends audio to Groq Whisper (`whisper-large-v3`)
+- `POST /api/summarize` sends transcript text to Groq chat completions (`llama-3.3-70b-versatile`)
+- summaries are saved back into Convex and can create tasks automatically
 
 ## 3. High-Level Architecture
 
@@ -70,155 +72,151 @@ flowchart TD
     A["Browser UI (Next.js App Router)"] --> B["Clerk"]
     A --> C["Convex React Client"]
     A --> D["Next.js API /api/summarize"]
-    A --> K["Next.js API /api/transcribe"]
-    A --> E["Browser APIs: WebRTC + Web Audio API"]
+    A --> E["Next.js API /api/transcribe"]
+    A --> F["Browser APIs: WebRTC + Web Audio"]
 
-    C --> F["Convex Queries/Mutations"]
-    F --> G["Convex Database Tables"]
-    F --> H["Convex HTTP /clerk webhook"]
+    C --> G["Convex Queries/Mutations"]
+    G --> H["Convex Tables"]
+    G --> I["Convex HTTP /clerk webhook"]
 
-    B --> H
-    D --> I["Groq Chat Completions API"]
-    K --> L["Groq Audio Transcriptions API"]
-    E --> J["Peer connections between browsers"]
+    B --> I
+    D --> J["Groq Chat Completions API"]
+    E --> K["Groq Audio Transcriptions API"]
+    F --> L["Peer-to-peer media between browsers"]
 ```
 
-### Layer responsibilities
+### Layer Responsibilities
 
-- `app/` defines routes, layouts, and metadata.
-- `components/` holds shared layout pieces, landing-page components, onboarding flow, and UI primitives.
-- `features/` contains domain-focused page components, services, hooks, and types.
-- `convex/` contains schema, auth config, HTTP webhook handling, and the main domain API.
-- `lib/` contains utility helpers.
-- `proxy.ts` protects authenticated routes with Clerk middleware.
+- `app/` contains routes, layouts, and metadata wrappers
+- `components/` contains shared UI primitives, layout shell pieces, landing page sections, onboarding UI, and providers
+- `features/` contains the actual page logic for dashboard, meetings, AI, organization, tasks, and WebRTC
+- `convex/` contains schema, auth config, HTTP webhooks, and domain queries/mutations
+- `lib/` contains utilities and metadata helpers
+- `proxy.ts` protects authenticated routes with Clerk middleware
 
 ## 4. Current End-to-End Workflow
 
 ### 4.1 Landing, Auth, and Route Protection
 
 1. A signed-out user lands on `/`.
-2. `app/page.tsx` checks `auth()` server-side.
-3. If the user is already authenticated, they are redirected to `/dashboard`.
-4. Otherwise they see the marketing page built from `components/home/*`.
-5. `/sign-in` and `/sign-up` render Clerk components inside the custom auth layout.
-6. `proxy.ts` protects `/dashboard(.*)` and `/meeting(.*)` routes with Clerk middleware.
+2. `app/page.tsx` checks Clerk auth on the server.
+3. Authenticated users are redirected to `/dashboard`.
+4. Signed-out users see the marketing landing page from `components/home/*`.
+5. `/sign-in` and `/sign-up` render Clerk auth UI in the custom auth layout.
+6. `proxy.ts` protects `/dashboard(.*)` and `/meeting(.*)` routes.
 
 Important current behavior:
 
-- `/onboarding` is not protected in middleware; it self-guards on the client by checking Clerk auth and redirecting if necessary.
+- `/onboarding` is not protected by middleware, but the onboarding UI redirects unauthenticated users to `/sign-in`
 
 ### 4.2 App Bootstrapping
 
-The root layout sets up:
+The root layout wires up:
 
 - `ClerkProvider`
 - `TooltipProvider`
-- `Providers`, which wraps the app with `ConvexProviderWithClerk`
-- `SyncUserWithConvex`, which pushes the current user and their Clerk organization memberships into Convex after authentication
-- `Toaster` for UI notifications
+- `Providers`, which uses `ConvexProviderWithClerk`
+- `SyncUserWithConvex`, which syncs the signed-in user and their org memberships into Convex
+- `Toaster`
 
-There are two parallel sync paths for identity data:
+Identity data is currently synced through two paths:
 
-- client-side sync via `components/sync-user-with-convex.tsx`
-- Clerk webhooks handled by `convex/http.ts`
+- client-side sync in `components/sync-user-with-convex.tsx`
+- Clerk webhook handling in `convex/http.ts`
 
 ### 4.3 Onboarding
 
-The onboarding flow is implemented in `components/onboarding/onboarding-flow.tsx`.
+The onboarding experience is implemented in `components/onboarding/onboarding-flow.tsx`.
 
-Workflow:
+Current flow:
 
-1. If the visitor is unauthenticated, redirect to `/sign-in`.
-2. If the user already has an organization selected, redirect to `/dashboard`.
-3. Otherwise show a 3-step UI:
-   - use case selection
-   - AI preference selection
-   - Clerk `CreateOrganization`
-4. After organization creation, Clerk redirects to `/dashboard`
+1. If not signed in, redirect to `/sign-in`
+2. If an organization is already selected, redirect to `/dashboard`
+3. Otherwise show a multi-step onboarding UI
+4. Final step uses Clerk `CreateOrganization`
+5. After org creation, Clerk sends the user to `/dashboard`
 
-Important current behavior:
+Current limitation:
 
-- use case and AI preference choices are only local UI state
-- they are not persisted anywhere
+- onboarding preferences are UI-only and are not persisted anywhere
 
 ### 4.4 Dashboard
 
-The dashboard lives at `/dashboard` and renders `DashboardPage`.
+`/dashboard` renders `DashboardPage`.
 
-Workflow:
+Current flow:
 
-1. `DashboardShell` checks `useOrganization()`.
-2. If no organization is selected, it client-redirects to `/onboarding`.
-3. `DashboardPage` calls `api.dashboard.index.getOverview` with the active organization ID.
+1. `DashboardShell` checks whether a Clerk organization is selected
+2. If no organization is selected, the user is redirected to `/onboarding`
+3. `DashboardPage` fetches `api.dashboard.index.getOverview`
 4. Convex returns:
-   - stats
+   - summary stats
    - recent meetings
-   - active meeting, if any
-5. The UI renders stat cards, recent meeting links, and a live-status card.
+   - one active meeting if present
+5. The page renders overview cards, recent meeting links, and a live-status card
 
 ### 4.5 Meeting Creation
 
-Meeting creation is triggered through `CreateMeetingDialog`.
+Meeting creation happens through `CreateMeetingDialog` and the meeting form components in `features/meeting/components/`.
 
-Two paths are implemented:
+Two paths exist:
 
 - instant meeting
 - scheduled meeting
 
 Instant flow:
 
-1. user clicks `Start Meeting`
-2. dialog calls `createInstantMeeting(...)`
-3. helper generates a fallback title like `Quick Meeting - 10:30 AM`
-4. Convex `meetings.create` inserts a meeting
-5. if `scheduledFor` is absent or in the past, the meeting starts as `active`
-6. org members receive notification records in Convex
-7. user is routed to `/meeting/{id}`
+1. user clicks the start action
+2. the frontend creates a fallback title when needed
+3. `meetings.create` inserts the meeting
+4. meetings with no future `scheduledFor` timestamp are created as `active`
+5. notifications are inserted for org members found in Convex
+6. the user is routed into `/meeting/{id}`
 
 Scheduled flow:
 
-1. user fills title, description, date, time, and optional agenda
+1. user enters title, date, time, and optional details
 2. the frontend converts date/time into a timestamp
-3. helper calls the same Convex `meetings.create` mutation
-4. if the timestamp is in the future, the meeting is stored as `scheduled`
-5. the page refreshes so the meeting list can update
+3. the same `meetings.create` mutation is used
+4. future meetings are stored as `scheduled`
+5. the meetings list refreshes
 
 Important current behavior:
 
-- `/meetings/create` is only a redirect back to `/meetings`
-- all creation UI currently lives in the dialog, not a dedicated page
+- `/meetings/create` is only a redirect to `/meetings`
+- there is no dedicated create page UI; creation is dialog-driven
 
 ### 4.6 Meetings Archive
 
-The meetings index is `/meetings`.
+`/meetings` renders `MeetingsPage`.
 
-Workflow:
+Current flow:
 
-1. `MeetingsPage` fetches `api.meetings.index.getByOrg`
+1. the page fetches `api.meetings.index.getByOrg`
 2. meetings are shown in a simple archive list
-3. links resolve as:
-   - active or scheduled meeting -> `/meeting/{id}`
-   - ended meeting -> `/meeting/{id}/details`
+3. links go to:
+   - `/meeting/{id}` for active or scheduled meetings
+   - `/meeting/{id}/details` for ended meetings
 
 ### 4.7 Live Meeting Room
 
-The live meeting room is `/meeting/{id}` and is backed by `MeetingRoomPage`.
+`/meeting/{id}` renders `MeetingRoomPage`.
 
-Main workflow:
+Current flow:
 
-1. frontend fetches meeting details and existing transcript rows from Convex
-2. `useWebrtc(meetingId)` immediately joins the meeting as a participant through Convex
-3. local camera/microphone access is requested through `getUserMedia`
-4. active participants are listed from Convex
-5. peer connections are formed for remote participants
-6. WebRTC signaling events are stored in Convex `signals`
-7. participant state changes are synchronized through Convex mutations
-8. local audio is captured and sent to the server for transcription while the meeting is active
-9. transcribed final lines returned by the API are saved into Convex
-10. side panel shows chat, AI summary, participant list, and transcript
-11. leaving the room ends the meeting if it is not already ended, then routes back to `/meetings`
+1. the page subscribes to the meeting document and transcript rows from Convex
+2. `useWebrtc(meetingId)` joins the participant into the room
+3. browser camera/microphone permission is requested through `getUserMedia`
+4. participant rows are read from Convex
+5. remote peer connections are established
+6. signaling is exchanged through the Convex `signals` table
+7. media state is synced back to Convex
+8. local microphone audio is captured and chunked for transcription
+9. transcript lines are batch-saved into Convex
+10. the side panel exposes chat, AI summary, participants, and transcript
+11. leaving the room currently also ends the meeting if it is not already ended
 
-The room UI is composed from:
+The room UI is composed primarily from:
 
 - `ParticipantGrid`
 - `MeetingControls`
@@ -226,128 +224,149 @@ The room UI is composed from:
 
 ### 4.8 In-Meeting Chat
 
-Chat is implemented in the side panel.
+Chat is implemented inside `MeetingSidePanel`.
 
-Workflow:
+Current flow:
 
-1. `MeetingSidePanel` subscribes to `messages.list`
-2. when the user sends a message, `messages.send`:
-   - verifies they joined the meeting
-   - inserts a message row
-   - updates the meeting's `lastActivityAt`
-3. the query updates reactively for all clients
+1. the side panel subscribes to `messages.list`
+2. sending a message calls `messages.send`
+3. Convex verifies the sender joined the meeting
+4. the message row is inserted
+5. the meeting `lastActivityAt` timestamp is updated
+6. all subscribed clients receive the new data reactively
 
 ### 4.9 Transcription
 
-Transcription uses client-side audio capture and server-side processing via Groq.
+Transcription is handled through browser audio capture plus a server transcription route.
 
-Workflow:
+Current flow:
 
-1. `useTranscription` captures raw PCM audio using the Web Audio API.
-2. The captured audio is analyzed for voice activity (VAD).
-3. Voiced audio is encoded into WAV chunks and periodically sent to `/api/transcribe`.
-4. The transcription API supports modes like `auto`, `hinglish`, `hindi`, and `english`.
-5. Transcriptions are generated using Groq's `whisper-large-v3` model.
-6. The frontend receives the transcribed text, and final lines are passed to `transcripts.add`.
-7. Convex stores transcript rows with speaker metadata.
-8. The transcript tab and meeting details page read from `transcripts.list`.
+1. `useTranscription` captures raw PCM audio through the Web Audio API
+2. a simple VAD-style threshold/hangover flow detects speech regions
+3. voiced chunks are encoded as WAV
+4. chunks are sent to `/api/transcribe`
+5. the API supports `auto`, `hinglish`, `hindi`, and `english` modes
+6. Groq Whisper returns text
+7. the route applies a cleanup pass and prompt-leak filtering
+8. final lines are queued and batch-written into Convex with `transcripts.addBatch`
+9. transcript views read from `transcripts.list`
 
 Important current behavior:
 
-- transcription only captures the local browser's audio stream (microphone); it does not transcribe mixed room audio or uploaded recordings.
-- it works seamlessly across modern browsers (Brave, Chrome, Safari, Firefox), bypassing native Web Speech API restrictions.
+- only the local browser microphone is transcribed
+- there is no mixed-room or uploaded-recording transcription pipeline
 
 ### 4.10 Summarization
 
-Summarization is manual.
+Summarization is implemented in two ways:
 
-Workflow:
+- manual summary generation from the AI tab in the meeting side panel
+- automatic periodic summary refresh inside the live meeting room every 5 minutes while the room is active
 
-1. user opens the `AI` tab in the meeting side panel
-2. clicks `Generate summary`
-3. the panel sends non-interim transcript lines to `/api/summarize`
-4. the API route formats them as `speaker: text`
-5. the API route calls Groq
-6. returned markdown-like content is saved through `meetings.saveSummary`
-7. summary is stored in `meeting_assets` as type `summary`
-8. meeting details and side panel display the latest saved summary
+Current flow:
+
+1. transcript lines are converted into a flat `sender: text` payload
+2. `/api/summarize` calls Groq with a JSON response format
+3. the route returns:
+   - `summary`
+   - `key_points`
+   - `decisions`
+   - `action_items`
+   - `actionItems` flat task title list
+4. `meetings.saveSummary` persists the result into `meeting_assets`
+5. `tasks.createFromSummary` creates deduplicated tasks from action items
+6. summary data is shown in the meeting side panel and meeting details page
+
+Important current behavior:
+
+- the side panel supports manual generate/regenerate
+- the meeting room also attempts automatic summary generation on an interval and when leaving the room
 
 ### 4.11 Meeting Details
 
-Ended meetings are primarily viewed at `/meeting/{id}/details`.
+Ended meetings are reviewed at `/meeting/{id}/details`.
 
-The page currently shows:
+Current page content:
 
-- meeting title, status, and purpose
+- meeting metadata
 - transcript history
-- latest summary
+- saved AI summary
+- rendered key points
+- rendered decisions
+- rendered action items
 
-It does not yet show:
+Not implemented there yet:
 
-- action-item extraction
 - recording playback
-- searchable transcript
-- speaker timeline analytics
+- transcript search/filtering
+- speaker analytics or timeline views
 
 ### 4.12 Notifications
 
-Notifications appear in the header bell.
+Notifications appear in the header bell component.
 
-Workflow:
+Current flow:
 
-1. meeting creation inserts notification rows for users whose `orgIds` include the org
-2. `NotificationBell` queries unread/read notification rows for the current user and org
-3. clicking an unread item triggers `notifications.markRead`
-4. links point back to the related meeting
+1. meeting creation inserts notification rows for org members
+2. the bell queries notifications for the current user and current org
+3. unread notifications can be marked read
+4. notifications link back into meeting routes
 
 ### 4.13 Insights
 
-The `/insights` page shows very lightweight workspace analytics.
+`/insights` shows lightweight reporting.
 
 Current data returned by Convex:
 
 - total meetings
 - active meetings
 - ended meetings
-- meeting timeline list
+- simple meeting timeline rows
 
-This is currently operational reporting, not AI analytics.
+This is currently operational reporting, not advanced AI analytics.
 
 ### 4.14 Tasks
 
-The `/tasks` page supports simple manual task capture.
+`/tasks` renders a simple task page.
 
-Workflow:
+Current flow:
 
-1. user enters a title
-2. `tasks.create` inserts an `open` task with source `manual`
-3. `tasks.list` fetches tasks for the current org and selected status
-4. page renders open tasks only by default
+1. user types a title
+2. `tasks.create` inserts an open manual task
+3. `tasks.list` loads tasks by org and status
+4. the page renders the current list
 
-There is no task editing, assignment workflow, or completion UI yet.
+Tasks are also created automatically from summary action items through `tasks.createFromSummary`.
+
+Current limitations:
+
+- no edit flow
+- no completion UI
+- no reassignment workflow
+- no due-date management UI
 
 ### 4.15 Organization, Settings, and Integrations
 
 `/organization`:
 
 - renders Clerk `OrganizationProfile`
-- also calls `organization.ensureIntegrations`
-- if no integrations exist yet, Convex seeds Zoom, Google Calendar, and Slack rows
+- calls `organization.ensureIntegrations`
+- seeds Zoom, Google Calendar, and Slack rows for the org if missing
 
 `/settings`:
 
-- renders Clerk `UserProfile`
+- renders the user settings/profile experience
 
 `/integrations`:
 
-- currently reuses `OrganizationPage`
-- there is no distinct integrations management screen even though integration records exist in Convex
+- is currently not a distinct integrations product surface
+- the route exists, but the current implementation remains minimal / transitional
 
 ## 5. Realtime and Data Flow Details
 
-### Meeting presence and participant lifecycle
+### Meeting Presence and Participant Lifecycle
 
-Participants are stored in `meeting_participants`.
+Participants live in `meeting_participants`.
 
 Current lifecycle:
 
@@ -358,47 +377,50 @@ Current lifecycle:
 
 Tracked participant state includes:
 
-- mic enabled
-- camera enabled
-- screen sharing enabled
 - joined/left status
+- joined/left timestamps
 - last seen timestamp
+- microphone enabled
+- camera enabled
+- screen-sharing enabled
 
-### WebRTC signaling flow
+### WebRTC Signaling Flow
 
-1. when remote participants appear, the hook decides whether this client should create an offer
-2. the offer is sent through `signals.send`
-3. the receiving client reads `signals.listForParticipant`
-4. answer and ICE candidates flow through the same table
-5. media streams are attached to `RTCPeerConnection`
-6. `ParticipantGrid` renders local and remote `MediaStream` instances
+1. when remote participants appear, the hook decides whether to create an offer
+2. signaling messages are inserted through `signals.send`
+3. recipients subscribe with `signals.listForParticipant`
+4. offers, answers, and ICE candidates travel through the same table
+5. processed signals are cleared through `signals.clear`
+6. remote streams are attached to `RTCPeerConnection` and rendered in the participant grid
 
-### Media state flow
+### Media State Flow
 
-- toggling mic/video updates local tracks and Convex participant state
-- screen sharing swaps the outgoing video track with `getDisplayMedia`
+- mic/video toggles update local tracks and Convex participant flags
+- screen sharing swaps the outgoing video track using `getDisplayMedia`
 - stopping screen share restores the camera track
 
 ## 6. Data Model
 
-The Convex schema currently defines the following tables.
+The current Convex schema defines these tables.
 
 ### `users`
 
-Stores synced user records from Clerk.
+Stores synced Clerk user data.
 
 Key fields:
 
 - `tokenIdentifier`
 - `clerkId`
 - `email`
-- `fullName`, `firstName`, `lastName`
+- `fullName`
+- `firstName`
+- `lastName`
 - `imageUrl`
 - `orgIds`
 
 ### `organizations`
 
-Stores Clerk organization mirror data.
+Stores mirrored Clerk organization data.
 
 Key fields:
 
@@ -417,8 +439,10 @@ Key fields:
 - `title`
 - `purpose`
 - `description`
-- creator metadata
-- `status`: `scheduled | active | ended`
+- `creatorTokenIdentifier`
+- `creatorClerkId`
+- `creatorName`
+- `status`
 - `scheduledFor`
 - `startedAt`
 - `endedAt`
@@ -471,7 +495,7 @@ Key fields:
 
 ### `meeting_assets`
 
-Stores generated or attached meeting artifacts.
+Stores meeting artifacts.
 
 Current types:
 
@@ -480,11 +504,12 @@ Current types:
 
 Current real usage:
 
-- only `summary` is actively used
+- `summary` is actively used
+- `recording` exists in schema only
 
 ### `notifications`
 
-Stores in-app user notifications.
+Stores in-app notifications.
 
 Key fields:
 
@@ -508,7 +533,7 @@ Kinds:
 
 ### `tasks`
 
-Simple org-scoped task records.
+Simple org-scoped tasks.
 
 Key fields:
 
@@ -523,7 +548,7 @@ Key fields:
 
 ### `integrations`
 
-Seeded integration placeholders.
+Seeded integration records.
 
 Key fields:
 
@@ -535,56 +560,78 @@ Key fields:
 - `connected`
 - `updatedAt`
 
+### `summary_chunks`
+
+Stores chunk-level summary snapshots.
+
+Key fields:
+
+- `meetingId`
+- `chunkIndex`
+- `summary`
+- `key_points`
+- `decisions`
+- `createdAt`
+
 ## 7. Convex Module Responsibilities
 
 ### `convex/users/index.ts`
 
-- sync user data from Clerk
-- upsert/delete users and organizations from webhooks
-- manage organization membership arrays
+- upsert/delete users
+- upsert/delete organizations
+- add/remove org membership
+- sync signed-in user data from Clerk identity
 
 ### `convex/meetings/index.ts`
 
 - create meetings
-- fetch single meeting with derived summary and participant count
-- fetch meetings by organization
+- get a meeting with derived participant/summary fields
+- get meetings by org
 - end meetings
-- get/save summaries
+- get and save summaries
+
+### `convex/meetings/summaryChunks.ts`
+
+- save chunk summaries
+- list chunk summaries for a meeting
 
 ### `convex/participants/index.ts`
 
-- join/leave meetings
+- join and leave rooms
 - heartbeat presence
 - update media flags
 - list active participants
 
 ### `convex/messages/index.ts`
 
-- list meeting chat messages
-- send meeting chat messages
+- list chat messages
+- send chat messages
 
 ### `convex/transcripts/index.ts`
 
-- add transcript lines
-- list transcript lines
+- add transcript rows
+- add transcript batches
+- list transcript rows
 
 ### `convex/signals/index.ts`
 
-- send signaling events
-- list signaling events for a participant
+- list signaling rows for a participant
+- send signaling payloads
+- clear processed signaling rows
 
 ### `convex/dashboard/index.ts`
 
-- build dashboard overview stats and recent meetings
+- build dashboard summary stats and recent meetings
 
 ### `convex/insights/index.ts`
 
-- build simple counts and timeline data
+- build simple counts and meeting timeline data
 
 ### `convex/tasks/index.ts`
 
-- create tasks
-- list tasks by org and status
+- list tasks
+- create manual tasks
+- create tasks from summary action items
 
 ### `convex/notifications/index.ts`
 
@@ -598,21 +645,19 @@ Key fields:
 
 ### `convex/http.ts`
 
-- exposes `/clerk` webhook endpoint
-- verifies Svix headers
+- exposes the `/clerk` Convex HTTP endpoint
+- verifies Svix webhook headers
 - mirrors Clerk events into Convex records
 
 ## 8. Frontend Structure and File Organization
 
-The project uses a mixed structure:
+The project is intentionally split into:
 
-- route-based organization in `app/`
-- reusable UI/layout in `components/`
-- domain modules in `features/`
+- thin route wrappers in `app/`
+- shared UI in `components/`
+- actual product logic in `features/`
 
-That means page routes stay thin, while real page logic lives inside feature components and feature services.
-
-### Current folder map
+### Current Folder Map
 
 ```text
 app/
@@ -639,7 +684,6 @@ app/
   api/
     summarize/route.ts
     transcribe/route.ts
-    webhooks/clerk/
   favicon.ico
   globals.css
   layout.tsx
@@ -647,75 +691,10 @@ app/
 
 components/
   home/
-    navbar.tsx
-    hero.tsx
-    features.tsx
-    footer.tsx
   layout/
-    notification-bell.tsx
   onboarding/
-    onboarding-flow.tsx
   shared/
-    app-sidebar.tsx
-    dashboard-shell.tsx
-    empty-state.tsx
-    loading-block.tsx
   ui/
-    accordion.tsx
-    alert-dialog.tsx
-    alert.tsx
-    aspect-ratio.tsx
-    avatar.tsx
-    badge.tsx
-    breadcrumb.tsx
-    button-group.tsx
-    button.tsx
-    calendar.tsx
-    card.tsx
-    carousel.tsx
-    chart.tsx
-    checkbox.tsx
-    collapsible.tsx
-    combobox.tsx
-    command.tsx
-    context-menu.tsx
-    dialog.tsx
-    direction.tsx
-    drawer.tsx
-    dropdown-menu.tsx
-    empty.tsx
-    field.tsx
-    hover-card.tsx
-    input-group.tsx
-    input-otp.tsx
-    input.tsx
-    item.tsx
-    kbd.tsx
-    label.tsx
-    menubar.tsx
-    native-select.tsx
-    navigation-menu.tsx
-    pagination.tsx
-    popover.tsx
-    progress.tsx
-    radio-group.tsx
-    resizable.tsx
-    scroll-area.tsx
-    select.tsx
-    separator.tsx
-    sheet.tsx
-    sidebar.tsx
-    skeleton.tsx
-    slider.tsx
-    sonner.tsx
-    spinner.tsx
-    switch.tsx
-    table.tsx
-    tabs.tsx
-    textarea.tsx
-    toggle-group.tsx
-    toggle.tsx
-    tooltip.tsx
   providers.tsx
   sync-user-with-convex.tsx
 
@@ -724,53 +703,23 @@ features/
     components/insights-page.tsx
     hooks/use-transcription.ts
     services/insight-service.ts
-    types/
-  auth/
-    components/
-    hooks/
-    services/
-    types/
   dashboard/
     components/dashboard-page.tsx
-    hooks/
     services/dashboard-service.ts
     types/dashboard-types.ts
   meeting/
     components/
-      create-meeting-dialog.tsx
-      meeting-details-page.tsx
-      meeting-form-instant.tsx
-      meeting-form-schedule.tsx
-      meeting-room-page.tsx
-      meeting-side-panel.tsx
-      meetings-page.tsx
-    hooks/
     services/meeting-service.ts
     types/meeting-types.ts
   organization/
     components/
-      organization-page.tsx
-      settings-page.tsx
-    hooks/
     services/organization-service.ts
-    types/
   tasks/
     components/tasks-page.tsx
-    hooks/
     services/task-service.ts
-    types/
   webrtc/
     components/
-      camera-toggle.tsx
-      meeting-controls.tsx
-      mic-toggle.tsx
-      participant-grid.tsx
-      screen-share-button.tsx
-      video-tile.tsx
     hooks/
-      use-audio-activity.ts
-      use-webrtc.ts
-    services/
     types/webrtc-types.ts
 
 convex/
@@ -780,9 +729,9 @@ convex/
   dashboard/index.ts
   insights/index.ts
   lib/
-    auth.ts
-    meetinghelpers.ts
-  meetings/index.ts
+  meetings/
+    index.ts
+    summaryChunks.ts
   messages/index.ts
   notifications/index.ts
   organization/index.ts
@@ -801,146 +750,119 @@ lib/
   utils.ts
 
 docs/
-  application_workflow.md
-  architecture.md
-  design.md
   current-implementation.md
 ```
 
-### Structural observations
+### Structural Observations
 
-- `app/` pages are intentionally thin and mostly delegate to feature components.
-- `features/` is the real domain layer for page behavior.
-- `components/ui/` is much larger than currently needed; many primitives are available but not yet used.
-- several feature subfolders exist as placeholders with no implementation yet, especially `features/auth/*`, some `hooks/`, `services/`, and `types/` folders.
-- some older root docs are aspirational and do not fully match current code.
+- `app/` routes are intentionally thin
+- `features/` is the real domain layer
+- `components/ui/` is broader than current app usage, which is fine for future growth
+- the codebase is much more feature-organized than older docs imply
+- some older architecture notes in the repo are now partially outdated
 
 ## 9. Design System and UI Language
 
-### Current design foundation
+### Current Design Foundation
 
-The active design system is implemented primarily through:
+The active styling system is primarily built from:
 
 - `app/globals.css`
 - `components.json`
-- shared shadcn/ui primitives in `components/ui/*`
+- shared primitives in `components/ui/*`
 
-### Core visual rules currently in code
+### Visual Direction in Code
 
-- dark mode is forced at the root by applying `className="dark"` on `<html>`
-- color tokens are CSS variables mapped into Tailwind via `@theme inline`
-- the palette is neutral and editorial rather than bright SaaS colors
-- all radius variables are set to `0px`
-- a subtle grid + radial background texture is applied to `body`
-- borders and thin outlines are used more than shadow-heavy cards
+- dark mode is forced at the root
+- the app relies on tokenized CSS variables
+- layout surfaces use borders more than heavy shadows
+- most cards and buttons are sharp-cornered / low-radius
+- dashboard and meeting views use a restrained, editorial dark theme
 
 ### Typography
 
-The app loads:
+The app currently loads:
 
 - `Inter`
 - `Geist`
 - `Geist Mono`
 
-The practical result is:
+### UI Consistency Notes
 
-- sans-serif UI typography for nearly everything
-- mono support available for technical surfaces
+- dashboard, meetings, and details pages largely follow the same current token system
+- auth and onboarding are visually compatible, though they use a somewhat different composition style than the main dashboard shell
 
-### Component style patterns
+## 10. Implemented vs Partial
 
-Common patterns across the current app:
+### Clearly Implemented
 
-- rectangular, zero-radius buttons and cards
-- small uppercase metadata labels
-- border-defined sections instead of heavily elevated surfaces
-- neutral `bg-card`, `bg-background`, `border-border`, `text-muted-foreground` usage
-- shadcn primitives customized into a more flat/editorial shell
-
-### Important design inconsistency
-
-The main dashboard and meeting experience use the current token system from `globals.css`, but the auth and onboarding routes still use older semantic class names like:
-
-- `bg-surface`
-- `text-on-surface`
-- `border-outline-variant`
-- `bg-primary-container`
-
-Those tokens are not defined in `app/globals.css`. That suggests those screens were built against an earlier or aspirational design vocabulary and are currently out of sync with the main app styling approach.
-
-## 10. What Is Implemented vs. What Is Still Partial
-
-### Clearly implemented
-
-- Clerk auth pages and Clerk middleware protection
-- organization onboarding with Clerk `CreateOrganization`
+- Clerk auth pages and route protection
+- organization onboarding
 - Convex + Clerk provider integration
 - user/org sync into Convex
-- meeting creation
-- meeting archive
-- browser-based meeting room
+- instant and scheduled meeting creation
+- meetings archive
+- live meeting room
 - WebRTC participant mesh with Convex signaling
 - realtime chat
-- browser speech recognition transcript capture
-- manual AI summary generation and persistence
+- microphone transcription via Groq Whisper
+- AI summaries with key points, decisions, and action items
+- automatic task creation from summary action items
 - meeting details page
-- simple dashboard, insights, tasks, notifications
-- Clerk organization and user profile pages
+- dashboard, insights, tasks, notifications
+- organization/settings pages backed by Clerk
 
-### Partial or placeholder
+### Partial or Placeholder
 
-- integrations: database seeding exists, dedicated UI does not
-- tasks: create/list only, no edit/complete/reassign flow
-- insights: counts and timeline only, no advanced analytics
-- meeting assets: recording type exists in schema but is not actively used
-- action items: not extracted automatically from summaries
-- scheduling: scheduled meetings are stored, but there is no scheduler or calendar/event runner
-- onboarding preferences: collected in UI only, not persisted
-- app/api/webhooks/clerk directory exists but is unused because Clerk webhooks are handled in Convex `http.ts`
+- integrations: data seeding exists, but there is no full integrations management product yet
+- tasks: create/list only; no edit/complete/reassign flow
+- insights: simple counts/timeline only
+- recordings: schema placeholder only
+- scheduling: meetings can be scheduled, but there is no reminder/cron/calendar orchestration
+- summary chunks exist in Convex, but chunk-level UX is not fully surfaced in the main product flow
 
-## 11. Important Current Implementation Caveats
+## 11. Important Current Caveats
 
-These are not aspirations; they are current code-level realities.
+These are current implementation realities, not future plans.
 
-### Product-level caveats
+### Product-Level Caveats
 
-- summaries are generated only when the user clicks the button
-- transcript quality depends on the local browser speech-recognition engine
-- WebRTC reliability may be limited in stricter network environments because there is no TURN server
-- integrations are represented mostly as seeded records
+- WebRTC uses STUN only; there is no TURN server
+- only local microphone audio is transcribed
+- integrations are mostly seeded placeholders
+- task management is still lightweight
 
-### Architecture and behavior caveats
+### Behavior / Architecture Caveats
 
-- the dashboard summary count is not org-scoped; it counts `meeting_assets` globally
-- the dashboard recent-meeting links always point to `/meeting/{id}`, even for ended meetings, while the archive page correctly routes ended meetings to `/meeting/{id}/details`
-- scheduled meetings are created as `scheduled`, but `participants.join` does not promote them to `active` or set `startedAt`
-- `/integrations` currently renders the same page as `/organization`
-- notification read-marking does not verify ownership before patching
+- leaving the live room currently ends the meeting for the room
+- many Convex functions rely on authentication but do not fully enforce org/meeting authorization boundaries yet
+- dashboard and insights are lightweight operational views rather than deep analytics
+- the build currently depends on installed packages like `groq-sdk` and `react-markdown`, and also on network access for Google font fetching
 
 ## 12. Final Assessment
 
-The current application is best described as a solid realtime meeting-workspace prototype with real end-to-end vertical slices already implemented:
+The current application is best described as a solid realtime meeting-workspace prototype with several real vertical slices already working:
 
 - auth and tenancy
 - Convex-backed realtime data
-- browser-based meeting rooms
-- live transcript persistence
-- manual AI summary generation
-- lightweight workspace operations pages
+- browser-based live meeting rooms
+- persisted transcript flow
+- AI summarization
+- basic workspace operations pages
 
-The strongest architectural decision in the current codebase is the separation between:
+The strongest architectural choice in the current codebase is the separation between:
 
-- thin Next.js routes
-- domain-specific `features/*`
+- thin Next.js route files
+- feature-oriented UI/service modules
 - Convex domain modules
 
-That structure is already good enough to scale the app further.
+That structure is good enough to keep building on.
 
-The main next-stage work, if this project continues, would likely be:
+The most important next-stage work would be:
 
-- hardening the meeting lifecycle
-- replacing browser-only transcription with a real media pipeline
-- adding TURN and more robust WebRTC handling
-- building a real integrations UI and backend
-- turning summaries into structured tasks/action items
-- unifying the design tokens across auth/onboarding and dashboard surfaces
+- security and authorization hardening
+- stronger meeting lifecycle rules
+- TURN support and WebRTC robustness
+- richer integrations UX/backend
+- better task lifecycle management
+- improved deployment/build reliability

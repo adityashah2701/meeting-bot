@@ -1,11 +1,12 @@
 import { query, mutation } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertOrgAccess, requireIdentity } from "../lib/auth";
 
 export const list = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
 
     return await ctx.db
       .query("notifications")

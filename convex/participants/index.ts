@@ -1,6 +1,6 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { getIdentityName, requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, getIdentityName, requireIdentity } from "../lib/auth";
 import { getMeetingParticipant } from "../lib/meetinghelpers";
 
 export const join = mutation({
@@ -10,11 +10,11 @@ export const join = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     const now = Date.now();
-    const meeting = await ctx.db.get(args.meetingId);
-
-    if (!meeting) {
-      throw new Error("Meeting not found");
-    }
+    const meeting = await assertMeetingAccess(
+      ctx,
+      identity.tokenIdentifier,
+      args.meetingId,
+    );
 
     if (
       meeting.status === "scheduled" &&
@@ -141,6 +141,8 @@ export const list = query({
     meetingId: v.id("meetings"),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     return await ctx.db
       .query("meeting_participants")
       .withIndex("by_meetingId_and_status", (q) =>

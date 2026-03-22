@@ -1,6 +1,6 @@
 import { query, mutation } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, requireIdentity } from "../lib/auth";
 import { getMeetingParticipant } from "../lib/meetinghelpers";
 
 export const add = mutation({
@@ -11,6 +11,7 @@ export const add = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const participant = await getMeetingParticipant(
       ctx,
       args.meetingId,
@@ -48,6 +49,7 @@ export const addBatch = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const participant = await getMeetingParticipant(
       ctx,
       args.meetingId,
@@ -92,6 +94,8 @@ export const addBatch = mutation({
 export const list = query({
   args: { meetingId: v.id("meetings") },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     return await ctx.db
       .query("transcripts")
       .withIndex("by_meetingId_and_timestamp", (q) =>

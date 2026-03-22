@@ -1,6 +1,6 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, requireIdentity } from "../lib/auth";
 import { getMeetingParticipant } from "../lib/meetinghelpers";
 
 export const list = query({
@@ -8,6 +8,8 @@ export const list = query({
     meetingId: v.id("meetings"),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     return await ctx.db
       .query("messages")
       .withIndex("by_meetingId_and_createdAt", (q) =>
@@ -25,6 +27,7 @@ export const send = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const participant = await getMeetingParticipant(
       ctx,
       args.meetingId,

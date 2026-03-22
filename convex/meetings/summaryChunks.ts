@@ -1,6 +1,6 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, requireIdentity } from "../lib/auth";
 
 export const saveChunk = mutation({
   args: {
@@ -11,7 +11,8 @@ export const saveChunk = mutation({
     decisions: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
 
     const existing = await ctx.db
       .query("summary_chunks")
@@ -44,6 +45,8 @@ export const saveChunk = mutation({
 export const listChunks = query({
   args: { meetingId: v.id("meetings") },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     return await ctx.db
       .query("summary_chunks")
       .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))

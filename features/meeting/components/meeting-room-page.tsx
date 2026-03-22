@@ -60,7 +60,6 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
   const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
-  const endMeeting = useMutation(meetingService.endMeeting);
   const saveSummary = useMutation(meetingService.saveSummary);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
 
@@ -198,8 +197,11 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
         toast.dismiss(toastId);
         summaryGenerated = Boolean(artifacts);
       }
-      if (meeting.status !== "ended") await endMeeting({ meetingId });
-      toast.success(summaryGenerated ? "Meeting ended and summary saved" : "Meeting ended");
+      toast.success(
+        summaryGenerated
+          ? "You left the meeting and summary was saved"
+          : "You left the meeting",
+      );
     } catch { toast.error("Unable to leave meeting cleanly"); }
     finally { router.push("/meetings"); }
   };

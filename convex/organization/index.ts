@@ -1,6 +1,6 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertOrgAccess, requireIdentity } from "../lib/auth";
 
 const defaultIntegrations = [
   {
@@ -28,7 +28,8 @@ export const ensureIntegrations = mutation({
     orgId: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     const existing = await ctx.db
       .query("integrations")
       .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
@@ -60,6 +61,8 @@ export const listIntegrations = query({
     orgId: v.string(),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     return await ctx.db
       .query("integrations")
       .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))

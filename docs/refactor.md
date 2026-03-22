@@ -1,252 +1,376 @@
-# 🚀 Meeting Bot — Transcription + AI Summary Optimization
 
-You are working on a **Next.js + Convex + WebRTC meeting platform** using Groq for transcription (Whisper) and summarization.
-
-The current system works but has issues with:
-- Hinglish (Hindi + English) transcription accuracy
-- inefficient transcript handling
-- manual summarization
-- lack of structured outputs
-
-Your task is to **optimize transcription and AI summary into a production-ready pipeline**.
+Here is a **clean, production-grade Codex prompt (in proper Markdown)** that you can directly use to optimize your current implementation, improve architecture, and extend features — based strictly on your existing system snapshot .
 
 ---
 
-# 🎙️ 1. TRANSCRIPTION PIPELINE
+# 🚀 Codex Optimization Prompt — Meeting Bot (Next.js + Convex + WebRTC + AI)
 
-## Goals
-- Improve Hinglish accuracy
-- Reduce hallucination
-- Optimize performance
+## 📌 Context
 
----
+You are working on a **real-time AI-powered meeting platform** built with:
 
-## 1.1 Add Transcription Buffer
+* Next.js 16 (App Router) + React 19
+* Convex (database + realtime backend)
+* Clerk (authentication + organizations)
+* WebRTC (peer-to-peer media)
+* Groq APIs (Whisper transcription + LLM summarization)
 
-Do NOT send transcripts line-by-line.
+The system already supports:
 
-Implement batching:
+* Authentication + org-based tenancy
+* Real-time meetings with WebRTC
+* Chat, transcripts, summaries, and tasks
+* Convex-powered reactive state
+* AI summaries with action items
+* Basic notifications, insights, and task management
 
-```
-buffer = []
+However, this is still a **prototype system** with limitations in:
 
-onTranscript(text):
-  buffer.push(text)
-
-every 5–10 seconds:
-  sendBatch(buffer)
-  buffer = []
-```
-
----
-
-## 1.2 Add AI Cleanup Layer (MANDATORY)
-
-After receiving transcription from Groq Whisper:
-
-- Pass text through Groq LLM for correction
-
-Prompt:
-
-```
-Fix the following transcription which may contain mixed Hindi and English (Hinglish).
-Do not change meaning.
-Do not hallucinate.
-Return clean and accurate text.
-```
+* Security & authorization
+* WebRTC reliability (STUN-only)
+* Task workflows
+* Integrations (partial)
+* Meeting lifecycle rules
+* Scalability & performance
 
 ---
 
-## 1.3 Improve Hinglish Handling
+# 🎯 Objective
 
-- Default transcription mode: `auto`
-- If instability detected:
-  - fallback to Hindi-leaning processing
-- Normalize output:
-  - preserve English terms (technical words, names)
-  - correct Hindi words properly
+Refactor and optimize the current implementation to:
 
----
-
-## 1.4 Add Confidence Filtering
-
-- Drop or flag low-confidence segments
-- Avoid saving noisy transcripts
+1. Improve **performance and scalability**
+2. Enforce **proper architecture and separation of concerns**
+3. Harden **security and authorization**
+4. Enhance **real-time reliability (WebRTC + Convex)**
+5. Extend **product features to production-level**
+6. Ensure **all integrations work correctly and are production-ready**
 
 ---
 
-## 1.5 Add Metadata
+# ⚙️ PART 1 — Code & Architecture Optimization
 
-Each transcript must include:
+## 🔹 1. Convex Backend Improvements
 
-```
-{
-  meetingId,
-  speakerId,
-  speakerName,
-  text,
-  timestamp
-}
+### Problems
+
+* Weak authorization checks
+* Overloaded mutations
+* Missing indexing strategies
+* Realtime subscriptions may over-fetch
+
+### Required Improvements
+
+* Implement **strict org-level and meeting-level authorization guards**
+* Add **row-level security patterns**
+* Split large mutations into:
+  * command handlers
+  * validation layer
+  * domain services
+* Introduce **Convex indexes** for:
+  * meetings by orgId + status
+  * transcripts by meetingId + timestamp
+  * messages by meetingId + createdAt
+* Implement:
+
+```ts
+assertOrgAccess(user, orgId)
+assertMeetingAccess(user, meetingId)
 ```
 
 ---
 
-# ⚡ 2. PERFORMANCE OPTIMIZATION
+## 🔹 2. WebRTC Optimization
 
-## 2.1 Batch Convex Writes
-- Combine transcript inserts
-- Avoid high-frequency mutations
+### Problems
 
-## 2.2 Debounce Transcription Calls
-- Prevent API spam
+* STUN-only → fails behind NAT/firewalls
+* Convex used as signaling store → latency risk
+* Mesh architecture → not scalable
 
-## 2.3 Avoid Reprocessing
-- Do not send duplicate audio chunks
+### Required Improvements
+
+* Add **TURN server support** (e.g., Coturn)
+* Implement:
+  * fallback ICE configuration
+* Optimize signaling:
+  * batch ICE candidates
+  * reduce DB writes
+* Add connection state monitoring:
+
+```ts
+pc.onconnectionstatechange
+```
+
+* Optional (advanced):
+  * introduce **SFU (Selective Forwarding Unit)** architecture
 
 ---
 
-# 🧾 3. AI SUMMARY SYSTEM
+## 🔹 3. Transcription Pipeline Optimization
 
-## Goals
-- Automate summaries
-- Reduce cost
-- Improve structure
+### Problems
 
----
+* Only local mic transcription
+* No speaker separation
+* No streaming pipeline
 
-## 3.1 Incremental Summarization (MANDATORY)
+### Required Improvements
 
-Do NOT send full transcript every time.
-
-Instead:
-
-```
-chunkSummary = summarize(last_5_minutes)
-store(chunkSummary)
-```
-
----
-
-## 3.2 Create summary_chunks Table
-
-```
-{
-  meetingId,
-  chunkIndex,
-  summary,
-  createdAt
-}
-```
+* Add:
+  * multi-speaker tagging
+  * speaker diarization logic (even heuristic)
+* Introduce:
+  * streaming transcription (WebSocket-based)
+* Batch processing optimization:
+  * adaptive chunking
+  * retry + fallback mechanism
 
 ---
 
-## 3.3 Final Summary Merge
+## 🔹 4. AI Summarization Improvements
 
-On meeting end:
+### Problems
 
-```
-finalSummary = merge(all_chunk_summaries)
-```
+* Entire transcript sent → inefficient
+* No incremental intelligence
 
----
+### Required Improvements
 
-## 3.4 Structured Output (MANDATORY)
+* Implement:
+  * chunk-based summarization pipeline
+  * summary merging strategy
+* Add:
+  * incremental summary updates
+* Cache summaries using:
 
-Return JSON:
-
-```
-{
-  "summary": "...",
-  "key_points": [],
-  "decisions": [],
-  "action_items": [
-    {
-      "task": "...",
-      "assignee": "...",
-      "due": null
-    }
-  ]
-}
+```ts
+summary_chunks
 ```
 
 ---
 
-## 3.5 Auto Summary Trigger
+## 🔹 5. Frontend Optimization (React + Next.js)
 
-Trigger:
-- every 5–10 minutes
-- when meeting ends
+### Problems
 
-Allow manual trigger as fallback.
+* Over-reliance on Convex subscriptions
+* Possible unnecessary re-renders
+
+### Required Improvements
+
+* Use:
+  * React memoization (`useMemo`, `useCallback`)
+  * component splitting
+* Introduce:
+  * suspense boundaries
+  * lazy loading for heavy components
+* Optimize:
+  * participant grid rendering
+  * transcript rendering (virtualization)
 
 ---
 
-# 🧩 4. ACTION ITEM EXTRACTION
+# 🔐 PART 2 — Security Hardening
 
-After summary:
+## Required Fixes
 
+* Enforce:
+  * org isolation (strict)
+  * meeting access validation
+* Validate all:
+  * Convex mutations
+  * API routes
+* Prevent:
+  * unauthorized transcript access
+  * message injection
+* Add:
+  * rate limiting for APIs
+  * input sanitization
+* Secure:
+  * Groq API calls (server-only usage)
+
+---
+
+# ⚡ PART 3 — Performance & Scaling
+
+## Required Improvements
+
+* Reduce Convex writes:
+  * batch signals
+  * batch transcript inserts
+* Introduce:
+  * caching layer (client + server)
+* Optimize:
+  * dashboard queries
+  * insights queries
+* Add:
+  * background jobs (cron-like system)
+    * scheduled meetings
+    * reminders
+    * summary generation
+
+---
+
+# 🧩 PART 4 — Feature Enhancements (HIGH VALUE)
+
+## 🔹 1. Meeting System
+
+* Do NOT end meeting when a user leaves
+* Add:
+  * host role
+  * co-host support
+* Meeting states:
+  * scheduled → active → ended → archived
+
+---
+
+## 🔹 2. Recording System
+
+* Implement:
+  * media recording (MediaRecorder API)
+  * upload to storage (S3 / Cloudflare R2)
+* Store in:
+
+```ts
+meeting_assets.type = "recording"
 ```
-tasks.create({
-  meetingId,
-  title,
-  assignee,
-  source: "ai"
-})
-```
 
-Enhance tasks:
-- add `status: open | completed`
-- add edit/update capability
-- allow assignment
+* Add playback UI in meeting details
 
 ---
 
-# 🧠 5. MEETING LIFECYCLE FIX
+## 🔹 3. Task Management (Upgrade to Full System)
 
-Fix scheduled → active transition:
+Add:
 
-```
-if (meeting.status === "scheduled" && scheduledFor <= now) {
-  status = "active"
-  startedAt = now
-}
-```
-
----
-
-# ⚡ 6. UX REQUIREMENTS
-
-- Show live transcription (real-time)
-- Show cleaned transcript (final)
-- Show AI processing state:
-  - "Generating summary..."
-- Allow:
-  - manual summary regeneration
-  - transcript editing
+* edit tasks
+* mark complete
+* assign users
+* due dates
+* priority levels
+* task comments
 
 ---
 
-# 🔒 7. SAFETY
+## 🔹 4. Integrations (MAKE THEM REAL)
 
-- Add user consent before transcription
-- Allow transcript correction
-- Do not assume AI output is always correct
+Implement actual working integrations:
+
+### Google Calendar
+
+* create events
+* sync scheduled meetings
+
+### Zoom / Meet
+
+* external meeting links
+
+### Slack
+
+* send:
+  * meeting alerts
+  * summary messages
 
 ---
 
-# ⚠️ CONSTRAINTS
+## 🔹 5. Notifications System Upgrade
 
-- Do NOT break existing Convex APIs unnecessarily
-- Maintain feature-based architecture
-- Keep system modular and scalable
+* Add:
+  * real-time push notifications
+  * email notifications
+  * reminder system
 
 ---
 
-# ✅ EXPECTED OUTPUT
+## 🔹 6. Insights & Analytics (AI-powered)
 
-- Improved Hinglish transcription accuracy
-- Reduced hallucination via AI cleanup
-- Efficient batching and performance
-- Automated structured summaries
-- Action items extracted automatically
-- Production-ready pipeline
+Add:
+
+* speaker talk-time analysis
+* sentiment analysis
+* keyword extraction
+* meeting productivity score
+
+---
+
+## 🔹 7. Search & UX Improvements
+
+* transcript search
+* filters (speaker, time)
+* timeline UI
+* highlight key moments
+
+---
+
+# 🧠 PART 5 — Advanced AI Features
+
+Add:
+
+* real-time AI assistant inside meeting
+* ask questions on transcript
+* auto-generated follow-ups
+* meeting Q&A chatbot
+
+---
+
+# 🧱 PART 6 — DevOps & Reliability
+
+## Required Improvements
+
+* Add:
+  * error boundaries
+  * logging system (Sentry)
+* Improve:
+  * environment handling
+* Ensure:
+  * production build stability
+* Add:
+  * retry logic for APIs
+  * fallback states
+
+---
+
+# 📦 PART 7 — Deliverables Expected from Codex
+
+1. Refactored backend logic (Convex modules)
+2. Improved WebRTC hook
+3. Secure API routes
+4. Optimized React components
+5. Integration implementations
+6. New feature modules (tasks, recordings, analytics)
+7. Scalable architecture patterns
+
+---
+
+# ⚠️ Constraints
+
+* Do NOT break existing functionality
+* Maintain:
+  * Clerk auth integration
+  * Convex backend compatibility
+  * Next.js App Router structure
+* All changes must be:
+  * backward compatible
+  * production-ready
+  * scalable
+
+---
+
+# ✅ Final Goal
+
+Transform this system from a **prototype meeting tool → production-grade AI meeting platform** with:
+
+* strong real-time performance
+* secure multi-tenant architecture
+* reliable media + AI pipelines
+* full collaboration workflows
+* working integrations
+
+---
+
+If you want, I can next:
+
+* convert this into **step-by-step implementation tasks**
+* or generate **actual optimized code for Convex/WebRTC parts**
+* or design **system architecture v2 diagram (very useful for interviews + projects)**

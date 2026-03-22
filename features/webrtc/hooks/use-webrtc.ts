@@ -9,11 +9,36 @@ import { meetingService } from "@/features/meeting/services/meeting-service";
 type SignalPayload = {
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+  candidates?: RTCIceCandidateInit[];
 };
 
-const rtcConfig: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-};
+const ICE_BATCH_FLUSH_MS = 250;
+
+function buildRtcConfig(): RTCConfiguration {
+  const stunUrls =
+    process.env.NEXT_PUBLIC_STUN_URLS
+      ?.split(",")
+      .map((url) => url.trim())
+      .filter(Boolean) ?? ["stun:stun.l.google.com:19302"];
+
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL?.trim();
+  const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME?.trim();
+  const turnCredential = process.env.NEXT_PUBLIC_TURN_PASSWORD?.trim();
+
+  const iceServers: RTCIceServer[] = [{ urls: stunUrls }];
+  if (turnUrl && turnUsername && turnCredential) {
+    iceServers.push({
+      urls: [turnUrl],
+      username: turnUsername,
+      credential: turnCredential,
+    });
+  }
+
+  return {
+    iceServers,
+    iceCandidatePoolSize: 10,
+  };
+}
 
 export function useWebrtc(meetingId: Id<"meetings">) {
   const joinMeeting = useMutation(meetingService.joinMeeting);
@@ -39,6 +64,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const remoteStreamsRef = useRef<Record<string, MediaStream>>({});
   const presentationStreamRef = useRef<MediaStream | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
 
   const participantRows = useQuery(meetingService.listParticipants, { meetingId });
   const signalRows = useQuery(
@@ -82,6 +108,36 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       window.clearInterval(intervalId);
     };
   }, [heartbeat, meetingId, participantId]);
+
+  useEffect(() => {
+    if (!participantId) {
+      return;
+    }
+
+    const flushCandidates = () => {
+      const pending = pendingIceCandidatesRef.current;
+      pendingIceCandidatesRef.current = {};
+
+      Object.entries(pending).forEach(([remoteParticipantId, candidates]) => {
+        if (candidates.length === 0) {
+          return;
+        }
+
+        void sendSignal({
+          meetingId,
+          receiverParticipantId: remoteParticipantId as Id<"meeting_participants">,
+          kind: "ice-candidate",
+          payload: JSON.stringify({ candidates }),
+        }).catch(() => undefined);
+      });
+    };
+
+    const intervalId = window.setInterval(flushCandidates, ICE_BATCH_FLUSH_MS);
+    return () => {
+      window.clearInterval(intervalId);
+      flushCandidates();
+    };
+  }, [meetingId, participantId, sendSignal]);
 
   useEffect(() => {
     // This effect runs exactly once. The localStreamRef guard prevents re-runs
@@ -203,7 +259,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       return peersRef.current[remoteParticipantId];
     }
 
-    const connection = new RTCPeerConnection(rtcConfig);
+    const connection = new RTCPeerConnection(buildRtcConfig());
     peersRef.current[remoteParticipantId] = connection;
 
     localStreamRef.current?.getTracks().forEach((track) => {
@@ -227,17 +283,22 @@ export function useWebrtc(meetingId: Id<"meetings">) {
         return;
       }
 
-      sendSignal({
-        meetingId,
-        receiverParticipantId: remoteParticipantId as Id<"meeting_participants">,
-        kind: "ice-candidate",
-        payload: JSON.stringify({ candidate: event.candidate.toJSON() }),
-      }).catch(() => undefined);
+      if (!pendingIceCandidatesRef.current[remoteParticipantId]) {
+        pendingIceCandidatesRef.current[remoteParticipantId] = [];
+      }
+      pendingIceCandidatesRef.current[remoteParticipantId].push(
+        event.candidate.toJSON(),
+      );
     };
 
     connection.onconnectionstatechange = () => {
       if (connection.connectionState === "failed") {
+        void connection.restartIce();
+        toast.error("Connection issue detected, retrying media path");
         delete peersRef.current[remoteParticipantId];
+      }
+      if (connection.connectionState === "disconnected") {
+        toast.message("Participant connection lost. Attempting recovery…");
       }
     };
 
@@ -325,6 +386,12 @@ export function useWebrtc(meetingId: Id<"meetings">) {
           await connection.addIceCandidate(
             new RTCIceCandidate(payload.candidate),
           );
+        }
+
+        if (signal.kind === "ice-candidate" && Array.isArray(payload.candidates)) {
+          for (const candidate of payload.candidates) {
+            await connection.addIceCandidate(new RTCIceCandidate(candidate));
+          }
         }
       }),
     )

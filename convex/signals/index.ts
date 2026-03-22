@@ -1,6 +1,6 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, requireIdentity } from "../lib/auth";
 import { getMeetingParticipant } from "../lib/meetinghelpers";
 
 export const listForParticipant = query({
@@ -9,6 +9,18 @@ export const listForParticipant = query({
     participantId: v.id("meeting_participants"),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+
+    const participant = await ctx.db.get(args.participantId);
+    if (
+      !participant ||
+      participant.meetingId !== args.meetingId ||
+      participant.userTokenIdentifier !== identity.tokenIdentifier
+    ) {
+      throw new Error("Forbidden");
+    }
+
     return await ctx.db
       .query("signals")
       .withIndex("by_receiverParticipantId_and_createdAt", (q) =>
@@ -33,6 +45,7 @@ export const send = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const sender = await getMeetingParticipant(
       ctx,
       args.meetingId,
@@ -41,6 +54,11 @@ export const send = mutation({
 
     if (!sender) {
       throw new Error("Join the meeting before sending signaling events");
+    }
+
+    const receiver = await ctx.db.get(args.receiverParticipantId);
+    if (!receiver || receiver.meetingId !== args.meetingId) {
+      throw new Error("Invalid signal receiver");
     }
 
     return await ctx.db.insert("signals", {
@@ -59,10 +77,21 @@ export const clear = mutation({
     signalIds: v.array(v.id("signals")),
   },
   handler: async (ctx, args) => {
-    await requireIdentity(ctx);
+    const identity = await requireIdentity(ctx);
 
     for (const signalId of args.signalIds) {
-      await ctx.db.delete(signalId);
+      const signal = await ctx.db.get(signalId);
+      if (!signal) {
+        continue;
+      }
+
+      const receiver = await ctx.db.get(signal.receiverParticipantId);
+      if (
+        receiver &&
+        receiver.userTokenIdentifier === identity.tokenIdentifier
+      ) {
+        await ctx.db.delete(signalId);
+      }
     }
 
     return args.signalIds.length;
