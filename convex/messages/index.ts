@@ -2,6 +2,7 @@ import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
 import { assertMeetingAccess, requireIdentity } from "../lib/auth";
 import { getMeetingParticipant } from "../lib/meetinghelpers";
+import { hasMeetingPermission } from "../lib/meetingPermissions";
 
 export const list = query({
   args: {
@@ -10,6 +11,16 @@ export const list = query({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const participant = await getMeetingParticipant(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+
+    if (!participant || participant.status !== "joined") {
+      throw new Error("Join the meeting before reading chat");
+    }
+
     return await ctx.db
       .query("messages")
       .withIndex("by_meetingId_and_createdAt", (q) =>
@@ -27,15 +38,19 @@ export const send = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
-    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const participant = await getMeetingParticipant(
       ctx,
       args.meetingId,
       identity.tokenIdentifier,
     );
 
-    if (!participant) {
+    if (!participant || participant.status !== "joined") {
       throw new Error("Join the meeting before sending messages");
+    }
+
+    if (!hasMeetingPermission(meeting, participant, "canSendChat")) {
+      throw new Error("Chat is disabled for you right now");
     }
 
     const now = Date.now();

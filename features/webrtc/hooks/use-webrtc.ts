@@ -74,6 +74,9 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const clearSignals = useMutation(meetingService.clearSignals);
 
   const [participantId, setParticipantId] = useState<Id<"meeting_participants"> | null>(null);
+  const [participantStatus, setParticipantStatus] = useState<
+    "waiting" | "joined" | "left" | "removed" | "rejected" | null
+  >(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   // cameraStream is the reactive state version of cameraStreamRef. It stays
   // persistent after first acquisition so camera senders keep a stable track/
@@ -114,7 +117,11 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   // applying side-effects, discarding stale calls.
   const cameraToggleTokenRef = useRef<symbol>(createToggleToken());
 
-  const participantRows = useQuery(meetingService.listParticipants, { meetingId });
+  const meetingState = useQuery(meetingService.getMeeting, { meetingId });
+  const participantRows = useQuery(
+    meetingService.listParticipants,
+    participantId ? { meetingId } : "skip",
+  );
   const signalRows = useQuery(
     meetingService.listSignals,
     participantId ? { meetingId, participantId } : "skip",
@@ -147,11 +154,24 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
   useEffect(() => {
     joinMeeting({ meetingId })
-      .then((id) => setParticipantId(id))
+      .then((result) => {
+        setParticipantStatus(result.participantStatus);
+        setParticipantId(result.participantId);
+      })
       .catch((error) => {
         toast.error(error instanceof Error ? error.message : "Unable to join meeting");
       });
   }, [joinMeeting, meetingId]);
+
+  useEffect(() => {
+    const currentParticipant = meetingState?.currentParticipant;
+    if (!currentParticipant) {
+      return;
+    }
+
+    setParticipantStatus(currentParticipant.status);
+    setParticipantId(currentParticipant.status === "joined" ? currentParticipant._id : null);
+  }, [meetingState?.currentParticipant]);
 
   useEffect(() => {
     if (!participantId) {
@@ -210,6 +230,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     // When the user turns the camera on, toggleVideo() calls getUserMedia for
     // video-only and attaches the resulting track to the peer connections.
     const setup = async () => {
+      if (participantStatus !== "joined") {
+        return;
+      }
+
       if (localStreamRef.current) {
         // Guard against React StrictMode double-invoke.
         return;
@@ -275,8 +299,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
     void setup();
     // Intentionally run once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [meetingId, participantStatus, updateMediaState]);
 
   useEffect(() => {
     const peerConnectionsRef = peersRef;
@@ -1136,6 +1159,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
   return {
     participantId,
+    participantStatus,
     localStream,
     cameraStream,
     presentationStream,

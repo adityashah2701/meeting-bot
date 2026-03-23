@@ -1,9 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import {
+  CheckCircle2,
+  Loader2,
+  Lock,
+  MoreHorizontal,
+  RefreshCw,
+  Settings2,
+  Sparkles,
+  Unlock,
+  UserCheck,
+  UserX,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +30,24 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
   meetingService,
@@ -27,6 +58,48 @@ import type {
   TranscriptLine,
   TranscriptionMode,
 } from "@/features/ai/hooks/use-transcription";
+import type {
+  MeetingJoinMode,
+  MeetingRole,
+  MeetingSettings,
+} from "@/features/meeting/types/meeting-types";
+
+const DEFAULT_SETTINGS: MeetingSettings = {
+  joinMode: "organization_only",
+  allowScreenShare: true,
+  allowChat: true,
+  allowReactions: true,
+  allowRecording: false,
+  allowParticipantsToUnmute: true,
+  autoAdmitOrgUsers: true,
+  lobbyEnabled: false,
+};
+
+function roleLabel(role: MeetingRole | undefined) {
+  switch (role) {
+    case "host":
+      return "Host";
+    case "co_host":
+      return "Co-host";
+    case "viewer":
+      return "Viewer";
+    default:
+      return "Participant";
+  }
+}
+
+function joinModeLabel(joinMode: MeetingJoinMode) {
+  switch (joinMode) {
+    case "organization_only":
+      return "Organization only";
+    case "invite_only":
+      return "Invite only";
+    case "ask_to_join":
+      return "Ask to join";
+    default:
+      return "Anyone with link";
+  }
+}
 
 export function MeetingSidePanel({
   meetingId,
@@ -46,15 +119,45 @@ export function MeetingSidePanel({
   const sendMessage = useMutation(meetingService.sendMessage);
   const saveSummary = useMutation(meetingService.saveSummary);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
-  const participants = useQuery(meetingService.listParticipants, { meetingId }) ?? [];
-  const messages = useQuery(meetingService.listMessages, { meetingId }) ?? [];
+  const admitParticipant = useMutation(meetingService.admitParticipant);
+  const bulkAdmitParticipants = useMutation(meetingService.bulkAdmitParticipants);
+  const rejectParticipant = useMutation(meetingService.rejectParticipant);
+  const updateParticipantRole = useMutation(meetingService.updateParticipantRole);
+  const setParticipantAudio = useMutation(meetingService.setParticipantAudio);
+  const removeParticipant = useMutation(meetingService.removeParticipant);
+  const updateMeetingSettings = useMutation(meetingService.updateMeetingSettings);
+
+  const meeting = useQuery(meetingService.getMeeting, { meetingId });
+  const participants = useQuery(
+    meetingService.listParticipants,
+    meeting?.currentParticipant?.status === "joined" ? { meetingId } : "skip",
+  ) ?? [];
+  const waitingRoom = useQuery(
+    meetingService.listWaitingRoom,
+    meeting?.effectivePermissions?.canAdmitOthers ? { meetingId } : "skip",
+  ) ?? [];
+  const messages = useQuery(
+    meetingService.listMessages,
+    meeting?.currentParticipant?.status === "joined" ? { meetingId } : "skip",
+  ) ?? [];
   const summaryAsset = useQuery(meetingService.getSummary, { meetingId });
 
   const [message, setMessage] = useState("");
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [structuredResult, setStructuredResult] = useState<MeetingSummaryResult | null>(null);
-  const normalizedTranscriptionMode =
-    transcriptionMode === "auto" ? "hindi_english_marathi" : transcriptionMode;
+  const [settingsDraft, setSettingsDraft] = useState<MeetingSettings>(DEFAULT_SETTINGS);
+  const [lockDraft, setLockDraft] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  useEffect(() => {
+    if (!meeting?.settings) {
+      return;
+    }
+
+    setSettingsDraft(meeting.settings);
+    setLockDraft(Boolean(meeting.isLocked));
+  }, [meeting?.isLocked, meeting?.settings]);
 
   const transcriptPayload = useMemo(
     () =>
@@ -64,10 +167,22 @@ export function MeetingSidePanel({
     [transcript],
   );
 
+  const canSendChat = Boolean(meeting?.effectivePermissions?.canSendChat);
+  const canManageParticipants = Boolean(meeting?.effectivePermissions?.canAdmitOthers);
+  const canManageRoles = Boolean(meeting?.effectivePermissions?.canManageRoles);
+  const canMuteOthers = Boolean(meeting?.effectivePermissions?.canMuteOthers);
+  const canRemoveParticipants = Boolean(meeting?.effectivePermissions?.canRemoveParticipants);
+  const canChangeSettings = Boolean(meeting?.effectivePermissions?.canChangeSettings);
+  const selfParticipantId = meeting?.currentParticipant?._id ?? null;
+
   const handleSendMessage = async () => {
     if (!message.trim()) return;
-    await sendMessage({ meetingId, body: message.trim() });
-    setMessage("");
+    try {
+      await sendMessage({ meetingId, body: message.trim() });
+      setMessage("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to send message");
+    }
   };
 
   const handleGenerateSummary = async () => {
@@ -80,8 +195,8 @@ export function MeetingSidePanel({
     try {
       const result = await summarizeTranscript(transcriptPayload);
       setStructuredResult(result);
-      await saveSummary({ 
-        meetingId, 
+      await saveSummary({
+        meetingId,
         summary: result.summary,
         key_points: result.key_points,
         decisions: result.decisions,
@@ -101,7 +216,35 @@ export function MeetingSidePanel({
     }
   };
 
-  // Prefer structured result from current session; fall back to persisted summary text
+  const handleParticipantMutation = async (
+    action: () => Promise<unknown>,
+    successMessage: string,
+  ) => {
+    try {
+      await action();
+      toast.success(successMessage);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update participant");
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      await updateMeetingSettings({
+        meetingId,
+        settings: settingsDraft,
+        isLocked: lockDraft,
+      });
+      setSettingsOpen(false);
+      toast.success("Meeting settings updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to save settings");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
   const displaySummary = structuredResult?.summary ?? summaryAsset?.content ?? null;
   const keyPoints = structuredResult?.key_points ?? [];
   const decisions = structuredResult?.decisions ?? [];
@@ -119,7 +262,6 @@ export function MeetingSidePanel({
           </TabsList>
         </div>
 
-        {/* ── Chat ── */}
         <TabsContent value="chat" className="mt-0 flex min-h-0 flex-1 flex-col p-4">
           <ScrollArea className="min-h-0 flex-1 pr-3">
             <div className="space-y-3">
@@ -142,14 +284,16 @@ export function MeetingSidePanel({
             <Input
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Send a message…"
+              placeholder={canSendChat ? "Send a message…" : "Chat is disabled"}
               onKeyDown={(e) => e.key === "Enter" && void handleSendMessage()}
+              disabled={!canSendChat}
             />
-            <Button onClick={() => void handleSendMessage()}>Send</Button>
+            <Button onClick={() => void handleSendMessage()} disabled={!canSendChat}>
+              Send
+            </Button>
           </div>
         </TabsContent>
 
-        {/* ── AI Summary ── */}
         <TabsContent value="ai" className="mt-0 flex min-h-0 flex-1 flex-col gap-3 p-4">
           <Button
             onClick={() => void handleGenerateSummary()}
@@ -188,114 +332,414 @@ export function MeetingSidePanel({
               </div>
             ) : (
               <div className="space-y-5 pr-2 text-sm">
-                {/* Summary */}
-                {displaySummary && (
+                {displaySummary ? (
                   <div>
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Overview
                     </p>
-                    <p className="text-foreground leading-relaxed whitespace-pre-wrap">{displaySummary}</p>
+                    <p className="whitespace-pre-wrap leading-relaxed text-foreground">{displaySummary}</p>
                   </div>
-                )}
+                ) : null}
 
-                {/* Key Points */}
-                {keyPoints.length > 0 && (
+                {keyPoints.length > 0 ? (
                   <div>
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Key Points
                     </p>
                     <ul className="space-y-1.5">
-                      {keyPoints.map((point, i) => (
-                        <li key={i} className="flex gap-2 text-foreground">
+                      {keyPoints.map((point, index) => (
+                        <li key={index} className="flex gap-2 text-foreground">
                           <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
                           {point}
                         </li>
                       ))}
                     </ul>
                   </div>
-                )}
+                ) : null}
 
-                {/* Decisions */}
-                {decisions.length > 0 && (
+                {decisions.length > 0 ? (
                   <div>
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Decisions
                     </p>
                     <ul className="space-y-1.5">
-                      {decisions.map((dec, i) => (
-                        <li key={i} className="flex gap-2 text-foreground">
+                      {decisions.map((decision, index) => (
+                        <li key={index} className="flex gap-2 text-foreground">
                           <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
-                          {dec}
+                          {decision}
                         </li>
                       ))}
                     </ul>
                   </div>
-                )}
+                ) : null}
 
-                {/* Action Items */}
-                {actionItems.length > 0 && (
+                {actionItems.length > 0 ? (
                   <div>
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Action Items
                     </p>
                     <div className="space-y-2">
-                      {actionItems.map((item, i) => (
+                      {actionItems.map((item, index) => (
                         <div
-                          key={i}
+                          key={index}
                           className="rounded-md border border-border bg-background px-3 py-2"
                         >
                           <p className="font-medium text-foreground">{item.task}</p>
                           <div className="mt-1 flex flex-wrap gap-2">
-                            {item.assignee && (
+                            {item.assignee ? (
                               <Badge variant="secondary" className="text-xs">
                                 {item.assignee}
                               </Badge>
-                            )}
-                            {item.due && (
+                            ) : null}
+                            {item.due ? (
                               <Badge variant="outline" className="text-xs text-muted-foreground">
                                 {item.due}
                               </Badge>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
             )}
           </ScrollArea>
         </TabsContent>
 
-        {/* ── People ── */}
         <TabsContent value="people" className="mt-0 min-h-0 flex-1 p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {participants.length} participant{participants.length === 1 ? "" : "s"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Join mode: {joinModeLabel(meeting?.settings?.joinMode ?? "organization_only")}
+              </p>
+            </div>
+            {canChangeSettings ? (
+              <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline" className="gap-2">
+                    <Settings2 className="h-4 w-4" />
+                    Settings
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Meeting settings</DialogTitle>
+                    <DialogDescription>
+                      Control access, lobby behavior, and participant privileges.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Join mode
+                      </p>
+                      <Select
+                        value={settingsDraft.joinMode}
+                        onValueChange={(value) =>
+                          setSettingsDraft((current) => ({
+                            ...current,
+                            joinMode: value as MeetingJoinMode,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="organization_only">Organization only</SelectItem>
+                          <SelectItem value="invite_only">Invite only</SelectItem>
+                          <SelectItem value="anyone_with_link">Anyone with link</SelectItem>
+                          <SelectItem value="ask_to_join">Ask to join</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-3 rounded-lg border border-border p-3">
+                      {[
+                        ["allowScreenShare", "Allow screen share"],
+                        ["allowChat", "Allow chat"],
+                        ["allowReactions", "Allow reactions"],
+                        ["allowRecording", "Allow recording"],
+                        ["allowParticipantsToUnmute", "Allow participants to unmute"],
+                        ["autoAdmitOrgUsers", "Auto-admit org users"],
+                        ["lobbyEnabled", "Enable lobby"],
+                      ].map(([field, label]) => (
+                        <div key={field} className="flex items-center justify-between gap-3">
+                          <p className="text-sm text-foreground">{label}</p>
+                          <Switch
+                            checked={settingsDraft[field as keyof MeetingSettings] as boolean}
+                            onCheckedChange={(checked) =>
+                              setSettingsDraft((current) => ({
+                                ...current,
+                                [field]: checked,
+                              }))
+                            }
+                          />
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+                        <div className="flex items-center gap-2">
+                          {lockDraft ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
+                          <p className="text-sm text-foreground">Lock meeting</p>
+                        </div>
+                        <Switch checked={lockDraft} onCheckedChange={setLockDraft} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button onClick={() => void handleSaveSettings()} disabled={isSavingSettings}>
+                      {isSavingSettings ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Saving
+                        </>
+                      ) : (
+                        "Save changes"
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            ) : null}
+          </div>
+
           <ScrollArea className="h-full pr-3">
-            <div className="space-y-2">
-              {participants.map((p) => (
-                <div key={p._id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-                  <p className="text-sm font-medium text-foreground">{p.name}</p>
-                  {p.isScreenSharing && (
-                    <Badge variant="secondary" className="text-xs">Presenting</Badge>
-                  )}
+            <div className="space-y-4">
+              {canManageParticipants && waitingRoom.length > 0 ? (
+                <div className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Waiting room</p>
+                      <p className="text-xs text-muted-foreground">
+                        {waitingRoom.length} request{waitingRoom.length === 1 ? "" : "s"} pending
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        void handleParticipantMutation(
+                          () =>
+                            bulkAdmitParticipants({
+                              meetingId,
+                              participantIds: waitingRoom.map((participant) => participant._id),
+                            }),
+                          "Waiting room admitted",
+                        )
+                      }
+                    >
+                      Admit all
+                    </Button>
+                  </div>
+
+                  {waitingRoom.map((participant) => (
+                    <div
+                      key={participant._id}
+                      className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{participant.name}</p>
+                        <p className="text-xs text-muted-foreground">{roleLabel(participant.role)}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            void handleParticipantMutation(
+                              () => admitParticipant({ meetingId, participantId: participant._id }),
+                              `${participant.name} admitted`,
+                            )
+                          }
+                        >
+                          Admit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() =>
+                            void handleParticipantMutation(
+                              () => rejectParticipant({ meetingId, participantId: participant._id }),
+                              `${participant.name} rejected`,
+                            )
+                          }
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : null}
+
+              <div className="space-y-2">
+                {participants.map((participant) => {
+                  const canManageThisParticipant =
+                    participant._id !== selfParticipantId &&
+                    participant.role !== "host" &&
+                    (canManageRoles || canMuteOthers || canRemoveParticipants);
+
+                  return (
+                    <div
+                      key={participant._id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-foreground">{participant.name}</p>
+                          <Badge variant={participant.role === "host" ? "default" : "secondary"} className="text-[10px]">
+                            {roleLabel(participant.role)}
+                          </Badge>
+                          {participant.isScreenSharing ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Presenting
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {participant.isMicEnabled ? "Mic on" : "Mic off"} · {participant.isCameraEnabled ? "Camera on" : "Camera off"}
+                        </p>
+                      </div>
+
+                      {canManageThisParticipant ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="icon-sm" variant="ghost">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>{participant.name}</DropdownMenuLabel>
+                            {canManageRoles ? (
+                              <>
+                                {participant.role !== "co_host" ? (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      void handleParticipantMutation(
+                                        () =>
+                                          updateParticipantRole({
+                                            meetingId,
+                                            participantId: participant._id,
+                                            role: "co_host",
+                                          }),
+                                        `${participant.name} is now a co-host`,
+                                      )
+                                    }
+                                  >
+                                    <UserCheck className="h-4 w-4" />
+                                    Make co-host
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {participant.role !== "participant" ? (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      void handleParticipantMutation(
+                                        () =>
+                                          updateParticipantRole({
+                                            meetingId,
+                                            participantId: participant._id,
+                                            role: "participant",
+                                          }),
+                                        `${participant.name} is now a participant`,
+                                      )
+                                    }
+                                  >
+                                    <UserCheck className="h-4 w-4" />
+                                    Make participant
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {participant.role !== "viewer" ? (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      void handleParticipantMutation(
+                                        () =>
+                                          updateParticipantRole({
+                                            meetingId,
+                                            participantId: participant._id,
+                                            role: "viewer",
+                                          }),
+                                        `${participant.name} is now a viewer`,
+                                      )
+                                    }
+                                  >
+                                    <UserCheck className="h-4 w-4" />
+                                    Make viewer
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </>
+                            ) : null}
+
+                            {canMuteOthers ? (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  void handleParticipantMutation(
+                                    () =>
+                                      setParticipantAudio({
+                                        meetingId,
+                                        participantId: participant._id,
+                                        isMicEnabled: !participant.isMicEnabled,
+                                      }),
+                                    participant.isMicEnabled
+                                      ? `${participant.name} muted`
+                                      : `${participant.name} unmuted`,
+                                  )
+                                }
+                              >
+                                {participant.isMicEnabled ? (
+                                  <VolumeX className="h-4 w-4" />
+                                ) : (
+                                  <Volume2 className="h-4 w-4" />
+                                )}
+                                {participant.isMicEnabled ? "Mute participant" : "Unmute participant"}
+                              </DropdownMenuItem>
+                            ) : null}
+
+                            {canRemoveParticipants ? (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  onClick={() =>
+                                    void handleParticipantMutation(
+                                      () => removeParticipant({ meetingId, participantId: participant._id }),
+                                      `${participant.name} removed`,
+                                    )
+                                  }
+                                >
+                                  <UserX className="h-4 w-4" />
+                                  Remove from meeting
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </ScrollArea>
         </TabsContent>
 
-        {/* ── Transcript ── */}
-        <TabsContent value="transcript" className="mt-0 min-h-0 flex h-full flex-1 flex-col p-4">
+        <TabsContent value="transcript" className="mt-0 flex h-full min-h-0 flex-1 flex-col p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Transcription Mode
               </p>
               <p className="text-xs text-muted-foreground">
-                Recommended: `Hindi + English + Marathi` for best mixed-language accuracy.
+                Use `Hindi + English` for Hinglish speech.
               </p>
             </div>
             <Select
-              value={normalizedTranscriptionMode}
+              value={transcriptionMode}
               onValueChange={(value) =>
                 onTranscriptionModeChange(value as TranscriptionMode)
               }
@@ -304,10 +748,9 @@ export function MeetingSidePanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="hindi_english_marathi">Hindi + English + Marathi</SelectItem>
-                <SelectItem value="hindi_english">Hindi + English</SelectItem>
+                <SelectItem value="auto">Auto</SelectItem>
+                <SelectItem value="hinglish">Hindi + English</SelectItem>
                 <SelectItem value="hindi">Hindi</SelectItem>
-                <SelectItem value="marathi">Marathi</SelectItem>
                 <SelectItem value="english">English</SelectItem>
               </SelectContent>
             </Select>
@@ -323,7 +766,9 @@ export function MeetingSidePanel({
                       <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
                     </span>
                     <p className="font-medium text-foreground">Listening…</p>
-                    <p className="max-w-xs text-xs">Start speaking clearly. Text will appear here as soon as words are detected.</p>
+                    <p className="max-w-xs text-xs">
+                      Start speaking clearly. Text will appear here as soon as words are detected.
+                    </p>
                   </div>
                 ) : (
                   <EmptyState title="Transcript empty" description="Unmute your mic and start speaking to stream transcript updates." />

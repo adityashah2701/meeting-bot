@@ -1,5 +1,7 @@
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
+import { getMeetingPageAccess } from "./meetingPermissions";
+import { getMeetingParticipant } from "./meetinghelpers";
 
 type ConvexCtx = QueryCtx | MutationCtx;
 
@@ -47,6 +49,21 @@ export async function assertOrgAccess(
   tokenIdentifier: string,
   orgId: string,
 ) {
+  const hasAccess = await hasOrgAccess(ctx, tokenIdentifier, orgId);
+  const user = await getCurrentUserRecord(ctx, tokenIdentifier);
+
+  if (!hasAccess) {
+    throw new Error("Forbidden");
+  }
+
+  return user;
+}
+
+export async function hasOrgAccess(
+  ctx: ConvexCtx,
+  tokenIdentifier: string,
+  orgId: string,
+) {
   // Use the indexed join table instead of the orgIds array field.
   // This is O(1), correctly tracked by Convex for reactive invalidation,
   // and works even if the user record has not been fully synced yet
@@ -73,18 +90,37 @@ export async function assertOrgAccess(
       .unique();
   }
 
-  const user = await getCurrentUserRecord(ctx, tokenIdentifier);
-
   if (!membership) {
     // Legacy fallback: for users created before the `user_org_memberships`
     // table was introduced, check their `orgIds` array directly.
+    const user = await getCurrentUserRecord(ctx, tokenIdentifier);
     if (user && user.orgIds.includes(orgId)) {
-      return user;
+      return true;
     }
-    throw new Error("Forbidden");
+    return false;
   }
 
-  return user;
+  return true;
+}
+
+export async function hasMeetingInvite(
+  ctx: ConvexCtx,
+  meetingId: Id<"meetings">,
+  email: string | null | undefined,
+) {
+  if (!email) {
+    return false;
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const invite = await ctx.db
+    .query("meeting_invites")
+    .withIndex("by_meetingId_and_email", (q) =>
+      q.eq("meetingId", meetingId).eq("email", normalizedEmail),
+    )
+    .unique();
+
+  return Boolean(invite);
 }
 
 export async function assertMeetingAccess(
@@ -97,15 +133,29 @@ export async function assertMeetingAccess(
     throw new Error("Meeting not found");
   }
 
-  await assertOrgAccess(ctx, tokenIdentifier, meeting.orgId);
+  const user = await getCurrentUserRecord(ctx, tokenIdentifier);
+  const participant = await getMeetingParticipant(ctx, meetingId, tokenIdentifier);
+  const isOrgMember = await hasOrgAccess(ctx, tokenIdentifier, meeting.orgId);
+  const isInvited = await hasMeetingInvite(ctx, meetingId, user?.email ?? null);
+
+  if (
+    !getMeetingPageAccess({
+      meeting,
+      isOrgMember,
+      isInvited,
+      participant,
+    })
+  ) {
+    throw new Error("Forbidden");
+  }
+
   return meeting;
 }
 
 export function assertMeetingHost(
-  identity: Awaited<ReturnType<typeof requireIdentity>>,
-  meeting: Doc<"meetings">,
+  participant: Pick<Doc<"meeting_participants">, "role"> | null,
 ) {
-  if (meeting.creatorTokenIdentifier !== identity.tokenIdentifier) {
+  if (!participant || participant.role !== "host") {
     throw new Error("Only the host can perform this action");
   }
 }

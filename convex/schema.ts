@@ -1,5 +1,11 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {
+  meetingParticipantStatusValidator,
+  meetingRoleValidator,
+  meetingSettingsValidator,
+  permissionsOverrideValidator,
+} from "./lib/meetingPermissions";
 
 export default defineSchema({
   users: defineTable({
@@ -44,7 +50,11 @@ export default defineSchema({
     creatorTokenIdentifier: v.string(),
     creatorClerkId: v.string(),
     creatorName: v.string(),
+    hostUserTokenIdentifier: v.string(),
+    hostClerkId: v.string(),
     status: v.union(v.literal("scheduled"), v.literal("active"), v.literal("ended")),
+    isLocked: v.boolean(),
+    settings: meetingSettingsValidator,
     scheduledFor: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),
@@ -60,16 +70,50 @@ export default defineSchema({
     clerkId: v.string(),
     name: v.string(),
     imageUrl: v.optional(v.string()),
-    status: v.union(v.literal("joined"), v.literal("left")),
+    role: meetingRoleValidator,
+    permissionsOverride: permissionsOverrideValidator,
+    status: meetingParticipantStatusValidator,
+    createdAt: v.number(),
+    requestedAt: v.optional(v.number()),
     joinedAt: v.number(),
+    admittedAt: v.optional(v.number()),
     leftAt: v.optional(v.number()),
+    removedAt: v.optional(v.number()),
+    rejectedAt: v.optional(v.number()),
+    removedByParticipantId: v.optional(v.id("meeting_participants")),
+    rejoinBlocked: v.boolean(),
     lastSeenAt: v.number(),
+    isMutedByModerator: v.boolean(),
     isMicEnabled: v.boolean(),
     isCameraEnabled: v.boolean(),
     isScreenSharing: v.boolean(),
   })
     .index("by_meetingId_and_status", ["meetingId", "status"])
-    .index("by_meetingId_and_userTokenIdentifier", ["meetingId", "userTokenIdentifier"]),
+    .index("by_meetingId_and_userTokenIdentifier", ["meetingId", "userTokenIdentifier"])
+    .index("by_meetingId_and_role", ["meetingId", "role"]),
+
+  meeting_invites: defineTable({
+    meetingId: v.id("meetings"),
+    email: v.string(),
+    role: meetingRoleValidator,
+    invitedByTokenIdentifier: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_meetingId", ["meetingId"])
+    .index("by_meetingId_and_email", ["meetingId", "email"]),
+
+  meeting_audit_logs: defineTable({
+    meetingId: v.id("meetings"),
+    actorParticipantId: v.optional(v.id("meeting_participants")),
+    actorName: v.string(),
+    action: v.string(),
+    targetParticipantId: v.optional(v.id("meeting_participants")),
+    targetName: v.optional(v.string()),
+    metadata: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_meetingId_and_createdAt", ["meetingId", "createdAt"])
+    .index("by_targetParticipantId", ["targetParticipantId"]),
 
   messages: defineTable({
     meetingId: v.id("meetings"),

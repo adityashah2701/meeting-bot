@@ -17,6 +17,9 @@ export function MeetingControls({
   isVideoOff,
   isScreenSharing,
   isHost,
+  canToggleAudio = true,
+  canToggleVideo = true,
+  canShareScreen = true,
   onToggleAudio,
   onToggleVideo,
   onToggleScreenShare,
@@ -27,6 +30,9 @@ export function MeetingControls({
   isVideoOff: boolean;
   isScreenSharing: boolean;
   isHost?: boolean;
+  canToggleAudio?: boolean;
+  canToggleVideo?: boolean;
+  canShareScreen?: boolean;
   onToggleAudio: () => void;
   onToggleVideo: () => void;
   onToggleScreenShare: () => void;
@@ -35,9 +41,13 @@ export function MeetingControls({
 }) {
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-background/90 px-5 py-3 shadow-2xl shadow-black/30 backdrop-blur-md">
-      <MicToggle muted={isAudioMuted} onClick={onToggleAudio} />
-      <CameraToggle off={isVideoOff} onClick={onToggleVideo} />
-      <ScreenShareButton active={isScreenSharing} onClick={onToggleScreenShare} />
+      <MicToggle muted={isAudioMuted} onClick={onToggleAudio} disabled={!canToggleAudio} />
+      <CameraToggle off={isVideoOff} onClick={onToggleVideo} disabled={!canToggleVideo} />
+      <ScreenShareButton
+        active={isScreenSharing}
+        onClick={onToggleScreenShare}
+        disabled={!canShareScreen}
+      />
       <div className="mx-2 h-7 w-px bg-border" />
       {isHost ? (
         <DropdownMenu>

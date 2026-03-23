@@ -6,15 +6,26 @@ export const meetingService = {
   getMeetings: api.meetings.index.getByOrg,
   getMeeting: api.meetings.index.get,
   endMeeting: api.meetings.index.endMeeting,
+  updateMeetingSettings: api.meetings.index.updateSettings,
+  updateMeetingLock: api.meetings.index.updateLock,
+  inviteParticipants: api.meetings.index.inviteParticipants,
   getSummary: api.meetings.index.getSummary,
   saveSummary: api.meetings.index.saveSummary,
   saveChunk: api.meetings.summaryChunks.saveChunk,
   listChunks: api.meetings.summaryChunks.listChunks,
   listParticipants: api.participants.index.list,
+  listWaitingRoom: api.participants.index.listWaitingRoom,
   joinMeeting: api.participants.index.join,
   leaveMeeting: api.participants.index.leave,
   heartbeatParticipant: api.participants.index.heartbeat,
   updateMediaState: api.participants.index.updateMedia,
+  admitParticipant: api.participants.index.admit,
+  bulkAdmitParticipants: api.participants.index.bulkAdmit,
+  rejectParticipant: api.participants.index.reject,
+  updateParticipantRole: api.participants.index.updateRole,
+  setParticipantAudio: api.participants.index.setParticipantAudio,
+  removeParticipant: api.participants.index.removeParticipant,
+  restoreParticipant: api.participants.index.restoreParticipant,
   listMessages: api.messages.index.list,
   sendMessage: api.messages.index.send,
   listSignals: api.signals.index.listForParticipant,
@@ -32,6 +43,17 @@ type CreateMeetingMutation = (args: {
   purpose?: string;
   description?: string;
   scheduledFor?: number;
+  settings?: {
+    joinMode: "organization_only" | "invite_only" | "anyone_with_link" | "ask_to_join";
+    allowScreenShare: boolean;
+    allowChat: boolean;
+    allowReactions: boolean;
+    allowRecording: boolean;
+    allowParticipantsToUnmute: boolean;
+    autoAdmitOrgUsers: boolean;
+    lobbyEnabled: boolean;
+  };
+  inviteEmails?: string[];
 }) => Promise<Id<"meetings">>;
 
 export function getInstantMeetingTitle(now = new Date()) {

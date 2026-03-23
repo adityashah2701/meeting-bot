@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
 import { useQuery, useMutation } from "convex/react";
-import { AlertCircle, Clock3, Mic, MicOff, PanelRightClose, PanelRightOpen, Radio } from "lucide-react";
+import { AlertCircle, Clock3, Lock, Mic, MicOff, PanelRightClose, PanelRightOpen, Radio, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -63,15 +62,12 @@ function getDefaultTranscriptionMode(): TranscriptionMode {
 
 export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const router = useRouter();
-  const { user } = useUser();
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
   const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
   const saveSummary = useMutation(meetingService.saveSummary);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
   const endMeeting = useMutation(meetingService.endMeeting);
-
-  const isHost = user?.id === meeting?.creatorClerkId;
 
   const [interimTranscript, setInterimTranscript] = useState<TranscriptLine | null>(null);
   const [queuedTranscriptLines, setQueuedTranscriptLines] = useState<TranscriptLine[]>([]);
@@ -85,6 +81,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
 
   const {
     participantId,
+    participantStatus,
     localStream,
     cameraStream,
     presentationStream,
@@ -207,6 +204,14 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   if (meeting === undefined) return <LoadingBlock className="h-screen w-full" />;
   if (!meeting) return <div className="p-6 text-sm text-muted-foreground">Meeting not found.</div>;
 
+  const currentParticipantStatus = meeting.currentParticipant?.status ?? participantStatus;
+  const isJoined = currentParticipantStatus === "joined";
+  const isHost = meeting.currentParticipant?.role === "host";
+  const canToggleAudio = isJoined && (!isAudioMuted || Boolean(meeting.effectivePermissions?.canUnmuteSelf));
+  const canToggleVideo = isJoined && meeting.currentParticipant?.role !== "viewer";
+  const canShareScreen = isJoined && Boolean(meeting.effectivePermissions?.canShareScreen);
+  const showMeetingLockBanner = isJoined && meeting.isLocked;
+
   const handleLeave = async () => {
     try {
       let summaryGenerated = false;
@@ -327,20 +332,56 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
         }`}
       >
         <div className="min-h-0 overflow-hidden p-3 lg:p-5">
-          <div className="h-full min-h-0">
-            <ParticipantGrid
-              localStream={localStream}
-              cameraStream={cameraStream}
-              presentationStream={presentationStream}
-              remoteCameraStreams={remoteCameraStreams}
-              remotePresentationStreams={remotePresentationStreams}
-              participants={participants}
-              localParticipantId={participantId}
-            />
-          </div>
+          {currentParticipantStatus === "waiting" ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center">
+                <ShieldAlert className="mx-auto h-10 w-10 text-amber-500" />
+                <h2 className="mt-4 text-xl font-semibold text-foreground">Waiting for admission</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  You&apos;re in the lobby. A host or co-host needs to admit you before media connects.
+                </p>
+                <Button className="mt-6" variant="outline" onClick={() => void handleLeave()}>
+                  Leave room
+                </Button>
+              </div>
+            </div>
+          ) : currentParticipantStatus === "removed" || currentParticipantStatus === "rejected" ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="max-w-md rounded-2xl border border-destructive/30 bg-destructive/5 p-8 text-center">
+                <AlertCircle className="mx-auto h-10 w-10 text-destructive" />
+                <h2 className="mt-4 text-xl font-semibold text-foreground">Meeting access unavailable</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {currentParticipantStatus === "removed"
+                    ? "A host or co-host removed you from this meeting."
+                    : "Your join request was rejected."}
+                </p>
+                <Button className="mt-6" variant="outline" onClick={() => void handleLeave()}>
+                  Return to meetings
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full min-h-0">
+              {showMeetingLockBanner ? (
+                <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                  <Lock className="h-3.5 w-3.5 shrink-0" />
+                  <span>The meeting is locked. New participants cannot join until a host unlocks it.</span>
+                </div>
+              ) : null}
+              <ParticipantGrid
+                localStream={localStream}
+                cameraStream={cameraStream}
+                presentationStream={presentationStream}
+                remoteCameraStreams={remoteCameraStreams}
+                remotePresentationStreams={remotePresentationStreams}
+                participants={participants}
+                localParticipantId={participantId}
+              />
+            </div>
+          )}
         </div>
 
-        {isSidebarOpen ? (
+        {isSidebarOpen && currentParticipantStatus !== "removed" && currentParticipantStatus !== "rejected" ? (
           <div className="min-h-0 overflow-hidden border-l border-border bg-card">
             <MeetingSidePanel
               meetingId={meetingId}
@@ -362,6 +403,9 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
             isVideoOff={isVideoOff}
             isScreenSharing={isScreenSharing}
             isHost={isHost}
+            canToggleAudio={canToggleAudio}
+            canToggleVideo={canToggleVideo}
+            canShareScreen={canShareScreen}
             onToggleAudio={() => void toggleAudio()}
             onToggleVideo={() => void toggleVideo()}
             onToggleScreenShare={() => void (isScreenSharing ? stopScreenShare() : startScreenShare())}

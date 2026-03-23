@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
+import type { MeetingParticipantStatus } from "./meetingPermissions";
 
 type ConvexCtx = QueryCtx | MutationCtx;
 
@@ -22,13 +23,36 @@ export async function listActiveParticipants(
   ctx: ConvexCtx,
   meetingId: Id<"meetings">,
 ) {
+  return await listMeetingParticipantsByStatus(ctx, meetingId, "joined");
+}
+
+export async function listMeetingParticipantsByStatus(
+  ctx: ConvexCtx,
+  meetingId: Id<"meetings">,
+  status: MeetingParticipantStatus,
+) {
   return await ctx.db
     .query("meeting_participants")
     .withIndex("by_meetingId_and_status", (q) =>
-      q.eq("meetingId", meetingId).eq("status", "joined"),
+      q.eq("meetingId", meetingId).eq("status", status),
     )
     .order("desc")
-    .take(20);
+    .take(200);
+}
+
+export async function listAllMeetingParticipants(
+  ctx: ConvexCtx,
+  meetingId: Id<"meetings">,
+) {
+  const grouped = await Promise.all([
+    listMeetingParticipantsByStatus(ctx, meetingId, "joined"),
+    listMeetingParticipantsByStatus(ctx, meetingId, "waiting"),
+    listMeetingParticipantsByStatus(ctx, meetingId, "left"),
+    listMeetingParticipantsByStatus(ctx, meetingId, "removed"),
+    listMeetingParticipantsByStatus(ctx, meetingId, "rejected"),
+  ]);
+
+  return grouped.flat();
 }
 
 export function getMeetingDuration(meeting: Doc<"meetings">) {

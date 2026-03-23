@@ -16,7 +16,8 @@ export const listForParticipant = query({
     if (
       !participant ||
       participant.meetingId !== args.meetingId ||
-      participant.userTokenIdentifier !== identity.tokenIdentifier
+      participant.userTokenIdentifier !== identity.tokenIdentifier ||
+      participant.status !== "joined"
     ) {
       throw new Error("Forbidden");
     }
@@ -52,12 +53,12 @@ export const send = mutation({
       identity.tokenIdentifier,
     );
 
-    if (!sender) {
+    if (!sender || sender.status !== "joined") {
       throw new Error("Join the meeting before sending signaling events");
     }
 
     const receiver = await ctx.db.get(args.receiverParticipantId);
-    if (!receiver || receiver.meetingId !== args.meetingId) {
+    if (!receiver || receiver.meetingId !== args.meetingId || receiver.status !== "joined") {
       throw new Error("Invalid signal receiver");
     }
 
