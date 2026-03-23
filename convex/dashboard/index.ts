@@ -1,6 +1,6 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
-import { assertOrgAccess, requireIdentity } from "../lib/auth";
+import { hasOrgAccess, requireIdentity } from "../lib/auth";
 
 export const getOverview = query({
   args: {
@@ -8,7 +8,21 @@ export const getOverview = query({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
-    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+    const hasAccess = await hasOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+    if (!hasAccess) {
+      return {
+        stats: {
+          totalMeetings: 0,
+          activeMeetings: 0,
+          scheduledMeetings: 0,
+          summariesGenerated: 0,
+          openTasks: 0,
+        },
+        recentMeetings: [],
+        activeMeeting: null,
+      };
+    }
+
     const meetings = await ctx.db
       .query("meetings")
       .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
