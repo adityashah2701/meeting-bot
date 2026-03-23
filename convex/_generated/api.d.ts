@@ -20,6 +20,7 @@ import type * as messages_index from "../messages/index.js";
 import type * as notifications_index from "../notifications/index.js";
 import type * as organization_index from "../organization/index.js";
 import type * as participants_index from "../participants/index.js";
+import type * as recordings_index from "../recordings/index.js";
 import type * as signals_index from "../signals/index.js";
 import type * as tasks_index from "../tasks/index.js";
 import type * as transcripts_index from "../transcripts/index.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   "notifications/index": typeof notifications_index;
   "organization/index": typeof organization_index;
   "participants/index": typeof participants_index;
+  "recordings/index": typeof recordings_index;
   "signals/index": typeof signals_index;
   "tasks/index": typeof tasks_index;
   "transcripts/index": typeof transcripts_index;

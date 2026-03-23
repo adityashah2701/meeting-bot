@@ -27,6 +27,32 @@ import {
   resolveParticipantPermissions,
 } from "../lib/meetingPermissions";
 
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function normalizeInviteEmailList(emails: string[]) {
+  return [...new Set(
+    emails
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+}
+
+function resolveInviteStatus(
+  invite: {
+    status?: "pending" | "accepted" | "cancelled" | "expired";
+    expiresAt?: number;
+  },
+) {
+  const baseStatus = invite.status ?? "pending";
+  if (baseStatus === "cancelled" || baseStatus === "accepted" || baseStatus === "expired") {
+    return baseStatus;
+  }
+  if (typeof invite.expiresAt === "number" && invite.expiresAt < Date.now()) {
+    return "expired" as const;
+  }
+  return "pending" as const;
+}
+
 async function insertAuditLog(
   ctx: MutationCtx,
   args: {
@@ -112,9 +138,7 @@ export const create = mutation({
       isScreenSharing: false,
     });
 
-    const inviteEmails = [...new Set((args.inviteEmails ?? [])
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean))];
+    const inviteEmails = normalizeInviteEmailList(args.inviteEmails ?? []);
 
     for (const email of inviteEmails) {
       await ctx.db.insert("meeting_invites", {
@@ -122,6 +146,11 @@ export const create = mutation({
         email,
         role: "participant",
         invitedByTokenIdentifier: identity.tokenIdentifier,
+        status: "pending",
+        expiresAt: now + INVITE_TTL_MS,
+        lastSentAt: now,
+        acceptedAt: undefined,
+        cancelledAt: undefined,
         createdAt: now,
       });
     }
@@ -296,8 +325,9 @@ export const inviteParticipants = mutation({
     }
 
     const role = args.role ?? "participant";
+    const now = Date.now();
     const inserted: string[] = [];
-    for (const email of [...new Set(args.emails.map((entry) => entry.trim().toLowerCase()).filter(Boolean))]) {
+    for (const email of normalizeInviteEmailList(args.emails)) {
       const existing = await ctx.db
         .query("meeting_invites")
         .withIndex("by_meetingId_and_email", (q) =>
@@ -314,7 +344,12 @@ export const inviteParticipants = mutation({
         email,
         role,
         invitedByTokenIdentifier: identity.tokenIdentifier,
-        createdAt: Date.now(),
+        status: "pending",
+        expiresAt: now + INVITE_TTL_MS,
+        lastSentAt: now,
+        acceptedAt: undefined,
+        cancelledAt: undefined,
+        createdAt: now,
       });
       inserted.push(email);
     }
@@ -328,6 +363,129 @@ export const inviteParticipants = mutation({
     });
 
     return inserted;
+  },
+});
+
+export const listInvites = query({
+  args: {
+    meetingId: v.id("meetings"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const participant = await getMeetingParticipant(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+
+    if (!hasMeetingPermission(meeting, participant, "canChangeSettings")) {
+      throw new Error("You do not have permission to view invites");
+    }
+
+    const invites = await ctx.db
+      .query("meeting_invites")
+      .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))
+      .order("desc")
+      .take(200);
+
+    return invites.map((invite) => {
+      const resolvedStatus = resolveInviteStatus(invite);
+      return {
+        ...invite,
+        resolvedStatus,
+      };
+    });
+  },
+});
+
+export const resendInvite = mutation({
+  args: {
+    meetingId: v.id("meetings"),
+    inviteId: v.id("meeting_invites"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const participant = await getMeetingParticipant(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+
+    if (!hasMeetingPermission(meeting, participant, "canChangeSettings")) {
+      throw new Error("You do not have permission to resend invites");
+    }
+
+    const invite = await ctx.db.get(args.inviteId);
+    if (!invite || invite.meetingId !== args.meetingId) {
+      throw new Error("Invite not found");
+    }
+    if ((invite.status ?? "pending") === "accepted") {
+      throw new Error("Accepted invites cannot be resent");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.inviteId, {
+      status: "pending",
+      expiresAt: now + INVITE_TTL_MS,
+      lastSentAt: now,
+      cancelledAt: undefined,
+    });
+
+    await insertAuditLog(ctx, {
+      meetingId: args.meetingId,
+      actorParticipantId: participant?._id,
+      actorName: participant?.name ?? getIdentityName(identity),
+      action: "invite_resent",
+      metadata: JSON.stringify({ email: invite.email }),
+    });
+
+    return args.inviteId;
+  },
+});
+
+export const cancelInvite = mutation({
+  args: {
+    meetingId: v.id("meetings"),
+    inviteId: v.id("meeting_invites"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const participant = await getMeetingParticipant(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+
+    if (!hasMeetingPermission(meeting, participant, "canChangeSettings")) {
+      throw new Error("You do not have permission to cancel invites");
+    }
+
+    const invite = await ctx.db.get(args.inviteId);
+    if (!invite || invite.meetingId !== args.meetingId) {
+      throw new Error("Invite not found");
+    }
+    if ((invite.status ?? "pending") === "accepted") {
+      throw new Error("Accepted invites cannot be cancelled");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.inviteId, {
+      status: "cancelled",
+      cancelledAt: now,
+    });
+
+    await insertAuditLog(ctx, {
+      meetingId: args.meetingId,
+      actorParticipantId: participant?._id,
+      actorName: participant?.name ?? getIdentityName(identity),
+      action: "invite_cancelled",
+      metadata: JSON.stringify({ email: invite.email }),
+    });
+
+    return args.inviteId;
   },
 });
 

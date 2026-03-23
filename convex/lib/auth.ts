@@ -120,7 +120,20 @@ export async function hasMeetingInvite(
     )
     .unique();
 
-  return Boolean(invite);
+  if (!invite) {
+    return false;
+  }
+
+  const status = invite.status ?? "pending";
+  const isExpired = typeof invite.expiresAt === "number" && invite.expiresAt < Date.now();
+  if (status === "cancelled") {
+    return false;
+  }
+  if (status === "expired" || isExpired) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function assertMeetingAccess(

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useOrganization } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
-import { Activity, CalendarDays, CheckSquare, FileText, Radio } from "lucide-react";
+import { Activity, CalendarDays, CheckSquare, FileText, Radio, Sparkles, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";

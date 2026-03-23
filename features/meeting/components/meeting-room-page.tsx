@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
-import { AlertCircle, Clock3, Lock, Mic, MicOff, PanelRightClose, PanelRightOpen, Radio, ShieldAlert } from "lucide-react";
+import { AlertCircle, CircleDot, Clock3, Focus, Lock, Mic, MicOff, PanelRightClose, PanelRightOpen, Pin, Radio, ShieldAlert, StopCircle, Subtitles } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -64,15 +64,23 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const router = useRouter();
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
+  const recordings = useQuery(meetingService.listRecordings, { meetingId }) ?? [];
   const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
   const saveSummary = useMutation(meetingService.saveSummary);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
   const endMeeting = useMutation(meetingService.endMeeting);
+  const startRecording = useMutation(meetingService.startRecording);
+  const stopRecording = useMutation(meetingService.stopRecording);
 
   const [interimTranscript, setInterimTranscript] = useState<TranscriptLine | null>(null);
   const [queuedTranscriptLines, setQueuedTranscriptLines] = useState<TranscriptLine[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>("auto");
+  const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
+  const [focusMode, setFocusMode] = useState(false);
+  const [compactRail, setCompactRail] = useState(false);
+  const [showFloatingTranscript, setShowFloatingTranscript] = useState(false);
+  const [transcriptDock, setTranscriptDock] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
   const dbTranscript = useMemo(() => transcriptRows ?? [], [transcriptRows]);
   const transcriptQueueRef = useRef<Array<{ text: string; timestamp: number }>>([]);
   const transcriptRef = useRef<TranscriptLine[]>([]);
@@ -207,10 +215,20 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const currentParticipantStatus = meeting.currentParticipant?.status ?? participantStatus;
   const isJoined = currentParticipantStatus === "joined";
   const isHost = meeting.currentParticipant?.role === "host";
+  const canRecord = isJoined && Boolean(meeting.effectivePermissions?.canStartRecording);
+  const activeRecording = recordings.find((recording) => recording.status === "recording") ?? null;
   const canToggleAudio = isJoined && (!isAudioMuted || Boolean(meeting.effectivePermissions?.canUnmuteSelf));
   const canToggleVideo = isJoined && meeting.currentParticipant?.role !== "viewer";
   const canShareScreen = isJoined && Boolean(meeting.effectivePermissions?.canShareScreen);
   const showMeetingLockBanner = isJoined && meeting.isLocked;
+  const transcriptDockClass =
+    transcriptDock === "top-left"
+      ? "left-4 top-4"
+      : transcriptDock === "top-right"
+        ? "right-4 top-4"
+        : transcriptDock === "bottom-left"
+          ? "left-4 bottom-28"
+          : "right-4 bottom-28";
 
   const handleLeave = async () => {
     try {
@@ -249,6 +267,30 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     finally { router.push("/meetings"); }
   };
 
+  const handleStartRecording = async () => {
+    try {
+      await startRecording({ meetingId, storageProvider: "cloud_pending" });
+      toast.success("Recording started");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to start recording");
+    }
+  };
+
+  const handleStopRecording = async () => {
+    if (!activeRecording) {
+      return;
+    }
+    try {
+      await stopRecording({
+        meetingId,
+        recordingId: activeRecording._id,
+      });
+      toast.success("Recording stopped and queued for processing");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to stop recording");
+    }
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* ── Header ── */}
@@ -261,6 +303,30 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
               <Radio className="h-3 w-3" />
               <span>{meeting.status}</span>
             </div>
+
+            {canRecord ? (
+              activeRecording ? (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="gap-1.5 rounded-full text-xs"
+                  onClick={() => void handleStopRecording()}
+                >
+                  <StopCircle className="h-3.5 w-3.5" />
+                  Stop Recording
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 rounded-full text-xs"
+                  onClick={() => void handleStartRecording()}
+                >
+                  <CircleDot className="h-3.5 w-3.5 text-red-500" />
+                  Start Recording
+                </Button>
+              )
+            ) : null}
 
             {/* Transcription status indicator */}
             {permissionDenied ? (
@@ -303,6 +369,62 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
               {isSidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
               {isSidebarOpen ? "Hide" : "Show"} Panel
             </Button>
+
+            <Button
+              size="sm"
+              variant={focusMode ? "default" : "ghost"}
+              className="rounded-full gap-1.5 text-xs"
+              onClick={() => setFocusMode((cur) => !cur)}
+            >
+              <Focus className="h-4 w-4" />
+              Focus
+            </Button>
+
+            <Button
+              size="sm"
+              variant={compactRail ? "default" : "ghost"}
+              className="rounded-full gap-1.5 text-xs"
+              onClick={() => setCompactRail((cur) => !cur)}
+            >
+              <Pin className="h-4 w-4" />
+              Compact Rail
+            </Button>
+
+            <Button
+              size="sm"
+              variant={showFloatingTranscript ? "default" : "ghost"}
+              className="rounded-full gap-1.5 text-xs"
+              onClick={() => setShowFloatingTranscript((cur) => !cur)}
+            >
+              <Subtitles className="h-4 w-4" />
+              Floating Transcript
+            </Button>
+
+            <select
+              className="h-8 rounded-full border border-border bg-background px-3 text-xs"
+              value={pinnedParticipantId ?? ""}
+              onChange={(event) => setPinnedParticipantId(event.target.value || null)}
+            >
+              <option value="">No Pin</option>
+              {participants.map((participant) => (
+                <option key={participant._id} value={participant._id}>
+                  Pin: {participant.name}
+                </option>
+              ))}
+            </select>
+
+            {showFloatingTranscript ? (
+              <select
+                className="h-8 rounded-full border border-border bg-background px-3 text-xs"
+                value={transcriptDock}
+                onChange={(event) => setTranscriptDock(event.target.value as typeof transcriptDock)}
+              >
+                <option value="top-left">Top Left</option>
+                <option value="top-right">Top Right</option>
+                <option value="bottom-left">Bottom Left</option>
+                <option value="bottom-right">Bottom Right</option>
+              </select>
+            ) : null}
           </div>
         </div>
 
@@ -376,6 +498,9 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                 remotePresentationStreams={remotePresentationStreams}
                 participants={participants}
                 localParticipantId={participantId}
+                pinnedParticipantId={pinnedParticipantId}
+                focusMode={focusMode}
+                compactRail={compactRail}
               />
             </div>
           )}
@@ -414,6 +539,27 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
           />
         </div>
       </div>
+
+      {showFloatingTranscript ? (
+        <div className={`fixed z-40 w-80 rounded-xl border border-border bg-card/95 p-3 shadow-xl backdrop-blur ${transcriptDockClass}`}>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Live Transcript
+            </p>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setShowFloatingTranscript(false)}>
+              Close
+            </Button>
+          </div>
+          <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+            {transcript.slice(-12).map((line) => (
+              <div key={line.id} className="rounded-md border border-border/70 px-2 py-1.5">
+                <p className="text-[11px] text-muted-foreground">{line.sender}</p>
+                <p className="text-xs text-foreground">{line.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

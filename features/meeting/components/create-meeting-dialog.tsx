@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import {
   createInstantMeeting,
   meetingService,
@@ -22,6 +23,15 @@ import {
 } from "@/features/meeting/services/meeting-service";
 import { MeetingFormInstant } from "@/features/meeting/components/meeting-form-instant";
 import { MeetingFormSchedule } from "@/features/meeting/components/meeting-form-schedule";
+
+function parseInviteEmails(value: string) {
+  return [...new Set(
+    value
+      .split(/[,\s\n;]+/)
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+}
 
 export function CreateMeetingDialog({
   triggerLabel = "Start Meeting",
@@ -36,6 +46,7 @@ export function CreateMeetingDialog({
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("instant");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [inviteEmailsText, setInviteEmailsText] = useState("");
 
   const requireOrganization = () => {
     if (!organization?.id) {
@@ -57,6 +68,7 @@ export function CreateMeetingDialog({
       const meetingId = await createInstantMeeting(createMeeting, {
         orgId,
         title: values.title,
+        inviteEmails: parseInviteEmails(inviteEmailsText),
       });
 
       setOpen(false);
@@ -91,6 +103,7 @@ export function CreateMeetingDialog({
         description: values.description,
         agenda: values.agenda,
         scheduledFor,
+        inviteEmails: parseInviteEmails(inviteEmailsText),
       });
 
       setOpen(false);
@@ -140,6 +153,20 @@ export function CreateMeetingDialog({
             />
           </TabsContent>
         </Tabs>
+
+        <div className="space-y-2">
+          <label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            Invite emails (optional)
+          </label>
+          <Input
+            value={inviteEmailsText}
+            onChange={(event) => setInviteEmailsText(event.target.value)}
+            placeholder="alex@company.com, tanya@company.com"
+          />
+          <p className="text-xs text-muted-foreground">
+            Comma, space, or semicolon separated emails.
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   );

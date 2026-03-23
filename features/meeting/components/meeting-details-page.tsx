@@ -11,14 +11,32 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { meetingService } from "@/features/meeting/services/meeting-service";
-import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2 } from "lucide-react";
-import React from "react";
+import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video } from "lucide-react";
+import React, { useState } from "react";
+
+function getSyncedTranscriptLine(
+  transcriptRows: Array<{ timestamp: number; text: string; speakerName: string }>,
+  recordingStartedAt: number,
+  currentTimeSeconds: number,
+) {
+  const targetTimestamp = recordingStartedAt + currentTimeSeconds * 1000;
+  for (let index = transcriptRows.length - 1; index >= 0; index -= 1) {
+    const row = transcriptRows[index];
+    if (row.timestamp <= targetTimestamp) {
+      return row;
+    }
+  }
+  return null;
+}
 
 export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcripts = useQuery(meetingService.listTranscripts, { meetingId });
+  const recordings = useQuery(meetingService.listRecordings, { meetingId });
+  const [activeRecordingId, setActiveRecordingId] = useState<string | null>(null);
+  const [activeRecordingTime, setActiveRecordingTime] = useState(0);
 
-  if (meeting === undefined || transcripts === undefined) {
+  if (meeting === undefined || transcripts === undefined || recordings === undefined) {
     return <LoadingBlock className="h-96 w-full" />;
   }
 
@@ -27,6 +45,10 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
   }
 
   const creationDate = new Date(meeting._creationTime);
+  const activeRecording = recordings.find((recording) => recording._id === activeRecordingId) ?? null;
+  const syncedTranscriptLine = activeRecording
+    ? getSyncedTranscriptLine(transcripts, activeRecording.startedAt, activeRecordingTime)
+    : null;
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
@@ -136,6 +158,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
         </Card>
 
         {/* Summary Column */}
+        <div className="space-y-6">
         <Card className="flex flex-col border-border/50 shadow-sm overflow-hidden rounded-2xl relative">
           <div className="absolute top-0 right-0 w-full h-1 bg-gradient-to-r from-primary via-primary/50 to-transparent" />
           <CardHeader className="border-b border-border/50 bg-primary/5 pb-4 pt-5 px-6">
@@ -238,6 +261,73 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
             </ScrollArea>
           </CardContent>
         </Card>
+        <Card className="border-border/50 shadow-sm overflow-hidden rounded-2xl">
+          <CardHeader className="border-b border-border/50 bg-muted/10 pb-4 pt-5 px-6">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <Video className="h-5 w-5 text-muted-foreground" />
+              Recordings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 p-4">
+            {recordings.length === 0 ? (
+              <EmptyState
+                title="No recordings yet"
+                description="When hosts or co-hosts record this meeting, entries will appear here."
+              />
+            ) : (
+              recordings.map((recording) => (
+                <div key={recording._id} className="space-y-2 rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-foreground">
+                      Recording · {new Date(recording.startedAt).toLocaleString()}
+                    </p>
+                    <Badge variant="secondary" className="text-[10px] uppercase">
+                      {recording.status}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Duration: {recording.durationMs ? `${Math.round(recording.durationMs / 1000)}s` : "Processing"}
+                  </p>
+                  {recording.playbackUrl ? (
+                    <video
+                      controls
+                      src={recording.playbackUrl}
+                      className="w-full rounded-md border border-border"
+                      onPlay={() => setActiveRecordingId(recording._id)}
+                      onPause={() => setActiveRecordingId((current) => (current === recording._id ? null : current))}
+                      onTimeUpdate={(event) => {
+                        if (activeRecordingId !== recording._id) {
+                          setActiveRecordingId(recording._id);
+                        }
+                        setActiveRecordingTime(event.currentTarget.currentTime);
+                      }}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Playback URL not available yet. Recording metadata is saved and awaiting media upload/processing.
+                    </p>
+                  )}
+                  {activeRecordingId === recording._id ? (
+                    <div className="rounded-md border border-border/70 bg-muted/20 px-2 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Synced Context
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {syncedTranscriptLine
+                          ? `${syncedTranscriptLine.speakerName}: ${syncedTranscriptLine.text}`
+                          : "No transcript line matched at this timestamp yet."}
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Summary: {meeting.summary ? "Available" : "Pending"}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+        </div>
       </div>
     </div>
   );

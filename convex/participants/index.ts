@@ -120,12 +120,24 @@ async function getInviteRole(
     return null;
   }
 
-  return await ctx.db
+  const invite = await ctx.db
     .query("meeting_invites")
     .withIndex("by_meetingId_and_email", (q) =>
       q.eq("meetingId", meetingId).eq("email", email.trim().toLowerCase()),
     )
     .unique();
+
+  if (!invite) {
+    return null;
+  }
+
+  const status = invite.status ?? "pending";
+  const isExpired = typeof invite.expiresAt === "number" && invite.expiresAt < Date.now();
+  if (status === "cancelled" || status === "expired" || isExpired) {
+    return null;
+  }
+
+  return invite;
 }
 
 export const join = mutation({
@@ -240,6 +252,13 @@ export const join = mutation({
     await ctx.db.patch(args.meetingId, {
       lastActivityAt: now,
     });
+
+    if (invite && decision.status === "joined" && (invite.status ?? "pending") !== "accepted") {
+      await ctx.db.patch(invite._id, {
+        status: "accepted",
+        acceptedAt: now,
+      });
+    }
 
     await insertAuditLog(ctx, {
       meetingId: args.meetingId,

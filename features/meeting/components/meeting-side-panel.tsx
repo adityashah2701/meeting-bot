@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -101,6 +101,22 @@ function joinModeLabel(joinMode: MeetingJoinMode) {
   }
 }
 
+function inviteStatusLabel(status: "pending" | "accepted" | "expired" | "cancelled") {
+  if (status === "accepted") return "Accepted";
+  if (status === "expired") return "Expired";
+  if (status === "cancelled") return "Cancelled";
+  return "Pending";
+}
+
+function parseInviteEmails(value: string) {
+  return [...new Set(
+    value
+      .split(/[,\s\n;]+/)
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+}
+
 export function MeetingSidePanel({
   meetingId,
   transcript,
@@ -126,6 +142,9 @@ export function MeetingSidePanel({
   const setParticipantAudio = useMutation(meetingService.setParticipantAudio);
   const removeParticipant = useMutation(meetingService.removeParticipant);
   const updateMeetingSettings = useMutation(meetingService.updateMeetingSettings);
+  const inviteParticipants = useMutation(meetingService.inviteParticipants);
+  const resendInvite = useMutation(meetingService.resendInvite);
+  const cancelInvite = useMutation(meetingService.cancelInvite);
 
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const participants = useQuery(
@@ -141,6 +160,10 @@ export function MeetingSidePanel({
     meeting?.currentParticipant?.status === "joined" ? { meetingId } : "skip",
   ) ?? [];
   const summaryAsset = useQuery(meetingService.getSummary, { meetingId });
+  const meetingInvites = useQuery(
+    meetingService.listInvites,
+    meeting?.effectivePermissions?.canChangeSettings ? { meetingId } : "skip",
+  ) ?? [];
 
   const [message, setMessage] = useState("");
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -149,6 +172,8 @@ export function MeetingSidePanel({
   const [lockDraft, setLockDraft] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [inviteEmailsInput, setInviteEmailsInput] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
 
   useEffect(() => {
     if (!meeting?.settings) {
@@ -245,6 +270,32 @@ export function MeetingSidePanel({
     }
   };
 
+  const handleInviteParticipants = async () => {
+    const emails = parseInviteEmails(inviteEmailsInput);
+    if (emails.length === 0) {
+      toast.error("Add at least one valid email");
+      return;
+    }
+
+    setIsInviting(true);
+    try {
+      const inserted = await inviteParticipants({
+        meetingId,
+        emails,
+      });
+      setInviteEmailsInput("");
+      if (inserted.length === 0) {
+        toast.message("No new invites were added");
+      } else {
+        toast.success(`${inserted.length} invite(s) sent`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to send invites");
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   const displaySummary = structuredResult?.summary ?? summaryAsset?.content ?? null;
   const keyPoints = structuredResult?.key_points ?? [];
   const decisions = structuredResult?.decisions ?? [];
@@ -284,7 +335,7 @@ export function MeetingSidePanel({
             <Input
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder={canSendChat ? "Send a message…" : "Chat is disabled"}
+              placeholder={canSendChat ? "Send a message..." : "Chat is disabled"}
               onKeyDown={(e) => e.key === "Enter" && void handleSendMessage()}
               disabled={!canSendChat}
             />
@@ -304,7 +355,7 @@ export function MeetingSidePanel({
             {isSummarizing ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                AI is generating summary…
+                AI is generating summary...
               </>
             ) : displaySummary ? (
               <>
@@ -328,7 +379,7 @@ export function MeetingSidePanel({
             ) : isSummarizing ? (
               <div className="flex flex-col items-center gap-3 pt-10 text-center text-sm text-muted-foreground">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                <p>Analyzing transcript…</p>
+                <p>Analyzing transcript...</p>
               </div>
             ) : (
               <div className="space-y-5 pr-2 text-sm">
@@ -378,7 +429,8 @@ export function MeetingSidePanel({
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Action Items
                     </p>
-                    <div className="space-y-2">
+                    {/* LEFT COLUMN — Join Mode + Toggles */}
+                    <div className="space-y-4">
                       {actionItems.map((item, index) => (
                         <div
                           key={index}
@@ -425,7 +477,7 @@ export function MeetingSidePanel({
                     Settings
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-10xl">
                   <DialogHeader>
                     <DialogTitle>Meeting settings</DialogTitle>
                     <DialogDescription>
@@ -433,10 +485,13 @@ export function MeetingSidePanel({
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Join mode
+                  {/* 3-column horizontal rectangular layout */}
+                  <div className="grid grid-cols-3 gap-6 pt-2">
+
+                    {/* COLUMN 1 — Join Mode */}
+                    <div className="space-y-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2">
+                        Join Mode
                       </p>
                       <Select
                         value={settingsDraft.joinMode}
@@ -447,7 +502,7 @@ export function MeetingSidePanel({
                           }))
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -459,7 +514,11 @@ export function MeetingSidePanel({
                       </Select>
                     </div>
 
-                    <div className="space-y-3 rounded-lg border border-border p-3">
+                    {/* COLUMN 2 — Permission Toggles */}
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2">
+                        Permissions
+                      </p>
                       {[
                         ["allowScreenShare", "Allow screen share"],
                         ["allowChat", "Allow chat"],
@@ -490,6 +549,110 @@ export function MeetingSidePanel({
                         <Switch checked={lockDraft} onCheckedChange={setLockDraft} />
                       </div>
                     </div>
+
+                    {/* COLUMN 3 — Invite People */}
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2">
+                        Invite People
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Add emails to invite participants to this meeting.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={inviteEmailsInput}
+                          onChange={(event) => setInviteEmailsInput(event.target.value)}
+                          placeholder="alex@company.com, sam@company.com"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => void handleInviteParticipants()}
+                          disabled={isInviting}
+                        >
+                          {isInviting ? "Inviting..." : "Invite"}
+                        </Button>
+                      </div>
+
+                      <ScrollArea className="h-40 rounded-md border border-border/60 p-2">
+                        <div className="space-y-2">
+                          {meetingInvites.length === 0 ? (
+                            <p className="px-2 py-1 text-xs text-muted-foreground">
+                              No invites yet.
+                            </p>
+                          ) : (
+                            meetingInvites.map((invite) => (
+                              <div
+                                key={invite._id}
+                                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-medium text-foreground">
+                                    {invite.email}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {roleLabel(invite.role)} · {inviteStatusLabel(invite.resolvedStatus)}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {invite.resolvedStatus !== "accepted" && invite.resolvedStatus !== "cancelled" ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          void handleParticipantMutation(
+                                            () =>
+                                              resendInvite({
+                                                meetingId,
+                                                inviteId: invite._id,
+                                              }),
+                                            "Invite resent",
+                                          )
+                                        }
+                                      >
+                                        Resend
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() =>
+                                          void handleParticipantMutation(
+                                            () =>
+                                              cancelInvite({
+                                                meetingId,
+                                                inviteId: invite._id,
+                                              }),
+                                            "Invite cancelled",
+                                          )
+                                        }
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  ) : null}
+                                  {invite.resolvedStatus === "accepted" ? (
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      Accepted
+                                    </Badge>
+                                  ) : null}
+                                  {invite.resolvedStatus === "cancelled" ? (
+                                    <Badge variant="outline" className="text-[10px]">
+                                      Cancelled
+                                    </Badge>
+                                  ) : null}
+                                  {invite.resolvedStatus === "expired" ? (
+                                    <Badge variant="outline" className="text-[10px]">
+                                      Expired
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </div>
+
                   </div>
 
                   <DialogFooter>
@@ -765,7 +928,7 @@ export function MeetingSidePanel({
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
                       <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
                     </span>
-                    <p className="font-medium text-foreground">Listening…</p>
+                    <p className="font-medium text-foreground">Listening...</p>
                     <p className="max-w-xs text-xs">
                       Start speaking clearly. Text will appear here as soon as words are detected.
                     </p>

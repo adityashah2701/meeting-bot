@@ -34,6 +34,9 @@ export function ParticipantGrid({
   remotePresentationStreams,
   participants,
   localParticipantId,
+  pinnedParticipantId,
+  focusMode = false,
+  compactRail = false,
 }: {
   /** Audio-only stream from the local mic — used exclusively for the speaking indicator. */
   localStream: MediaStream | null;
@@ -44,9 +47,16 @@ export function ParticipantGrid({
   remotePresentationStreams: Record<string, MediaStream>;
   participants: Participant[];
   localParticipantId: string | null;
+  pinnedParticipantId?: string | null;
+  focusMode?: boolean;
+  compactRail?: boolean;
 }) {
   const localParticipant = participants.find((p) => p._id === localParticipantId) ?? null;
   const screenSharer = participants.find((p) => p.isScreenSharing) ?? null;
+  const pinnedParticipant =
+    pinnedParticipantId
+      ? participants.find((p) => p._id === pinnedParticipantId) ?? null
+      : null;
   const thumbnailParticipants = participants.filter(
     (p) => p._id !== screenSharer?._id && p._id !== localParticipantId,
   );
@@ -79,7 +89,7 @@ export function ParticipantGrid({
         </div>
 
         {/* Thumbnail rail */}
-        <div className="flex w-48 shrink-0 flex-col gap-3 overflow-y-auto">
+        <div className={cn("shrink-0 overflow-y-auto", compactRail ? "w-32" : "w-48", "flex flex-col gap-3")}>
           {localParticipant && (
             <AspectRatio ratio={16 / 9}>
               <VideoTile
@@ -130,6 +140,51 @@ export function ParticipantGrid({
     ...(localParticipant ? [localParticipant] : []),
     ...participants.filter((p) => p._id !== localParticipantId),
   ];
+
+  if (focusMode && pinnedParticipant) {
+    const rail = allParticipants.filter((p) => p._id !== pinnedParticipant._id);
+    return (
+      <div className="flex h-full min-h-0 gap-3">
+        <div className="min-h-0 flex-1">
+          <AspectRatio ratio={16 / 9} className="h-full max-h-full">
+            <VideoTile
+              className="h-full rounded-xl"
+              stream={
+                pinnedParticipant._id === localParticipantId
+                  ? cameraStream
+                  : (remoteCameraStreams[pinnedParticipant._id] ?? null)
+              }
+              audioStream={pinnedParticipant._id === localParticipantId ? localStream : undefined}
+              name={pinnedParticipant.name}
+              imageUrl={pinnedParticipant.imageUrl}
+              isLocal={pinnedParticipant._id === localParticipantId}
+              isMicEnabled={pinnedParticipant.isMicEnabled}
+              isCameraEnabled={pinnedParticipant.isCameraEnabled}
+              isScreenSharing={pinnedParticipant.isScreenSharing}
+            />
+          </AspectRatio>
+        </div>
+        <div className={cn("shrink-0 overflow-y-auto", compactRail ? "w-32" : "w-48", "flex flex-col gap-3")}>
+          {rail.map((p) => (
+            <AspectRatio ratio={16 / 9} key={p._id}>
+              <VideoTile
+                className="h-full rounded-lg"
+                stream={p._id === localParticipantId ? cameraStream : (remoteCameraStreams[p._id] ?? null)}
+                audioStream={p._id === localParticipantId ? localStream : undefined}
+                name={p.name}
+                imageUrl={p.imageUrl}
+                isLocal={p._id === localParticipantId}
+                isMicEnabled={p.isMicEnabled}
+                isCameraEnabled={p.isCameraEnabled}
+                isScreenSharing={p.isScreenSharing}
+              />
+            </AspectRatio>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const count = allParticipants.length;
   const gridClass = getGridClass(count);
 

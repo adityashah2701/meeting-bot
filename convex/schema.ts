@@ -97,6 +97,21 @@ export default defineSchema({
     email: v.string(),
     role: meetingRoleValidator,
     invitedByTokenIdentifier: v.string(),
+    // Backwards-compatible fields from legacy invite rows.
+    token: v.optional(v.string()),
+    sentAt: v.optional(v.number()),
+    status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("accepted"),
+        v.literal("cancelled"),
+        v.literal("expired"),
+      ),
+    ),
+    expiresAt: v.optional(v.number()),
+    lastSentAt: v.optional(v.number()),
+    acceptedAt: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_meetingId", ["meetingId"])
@@ -151,6 +166,32 @@ export default defineSchema({
     storageId: v.optional(v.id("_storage")),
     updatedAt: v.number(),
   }).index("by_meetingId_and_type", ["meetingId", "type"]),
+
+  meeting_recordings: defineTable({
+    meetingId: v.id("meetings"),
+    orgId: v.string(),
+    ownerParticipantId: v.optional(v.id("meeting_participants")),
+    ownerTokenIdentifier: v.string(),
+    startedAt: v.number(),
+    stoppedAt: v.optional(v.number()),
+    durationMs: v.optional(v.number()),
+    status: v.union(
+      v.literal("recording"),
+      v.literal("processing"),
+      v.literal("ready"),
+      v.literal("failed"),
+    ),
+    storageProvider: v.optional(v.string()),
+    storageLocation: v.optional(v.string()),
+    playbackUrl: v.optional(v.string()),
+    transcriptAssetId: v.optional(v.id("meeting_assets")),
+    summaryAssetId: v.optional(v.id("meeting_assets")),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_meetingId_and_createdAt", ["meetingId", "createdAt"])
+    .index("by_meetingId_and_status", ["meetingId", "status"]),
 
   notifications: defineTable({
     userTokenIdentifier: v.string(),

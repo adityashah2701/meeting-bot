@@ -9,8 +9,16 @@ export const meetingService = {
   updateMeetingSettings: api.meetings.index.updateSettings,
   updateMeetingLock: api.meetings.index.updateLock,
   inviteParticipants: api.meetings.index.inviteParticipants,
+  listInvites: api.meetings.index.listInvites,
+  resendInvite: api.meetings.index.resendInvite,
+  cancelInvite: api.meetings.index.cancelInvite,
   getSummary: api.meetings.index.getSummary,
   saveSummary: api.meetings.index.saveSummary,
+  startRecording: api.recordings.index.start,
+  stopRecording: api.recordings.index.stop,
+  markRecordingReady: api.recordings.index.markReady,
+  markRecordingFailed: api.recordings.index.markFailed,
+  listRecordings: api.recordings.index.listByMeeting,
   saveChunk: api.meetings.summaryChunks.saveChunk,
   listChunks: api.meetings.summaryChunks.listChunks,
   listParticipants: api.participants.index.list,
@@ -68,6 +76,7 @@ export async function createInstantMeeting(
   args: {
     orgId: string;
     title?: string;
+    inviteEmails?: string[];
   },
 ) {
   const title = args.title?.trim() || getInstantMeetingTitle();
@@ -76,6 +85,7 @@ export async function createInstantMeeting(
     orgId: args.orgId,
     title,
     purpose: title,
+    inviteEmails: args.inviteEmails,
   });
 }
 
@@ -87,6 +97,7 @@ export async function scheduleMeeting(
     description?: string;
     agenda?: string;
     scheduledFor: number;
+    inviteEmails?: string[];
   },
 ) {
   const title = args.title.trim();
@@ -99,6 +110,7 @@ export async function scheduleMeeting(
     description,
     purpose: agenda || description || title,
     scheduledFor: args.scheduledFor,
+    inviteEmails: args.inviteEmails,
   });
 }
 
