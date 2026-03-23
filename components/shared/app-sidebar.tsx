@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, LayoutDashboard, CalendarDays, LineChart, Building2, CheckSquare, Settings, Sparkles } from "lucide-react";
+import { Menu, LayoutDashboard, CalendarDays, LineChart, Building2, CheckSquare, Inbox, Settings, Sparkles } from "lucide-react";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/invitations", label: "Invitations", icon: Inbox },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
   { href: "/insights", label: "Insights", icon: LineChart },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },

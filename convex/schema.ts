@@ -21,7 +21,8 @@ export default defineSchema({
     orgIds: v.array(v.string()),
   })
     .index("by_tokenIdentifier", ["tokenIdentifier"])
-    .index("by_clerkId", ["clerkId"]),
+    .index("by_clerkId", ["clerkId"])
+    .index("by_email", ["email"]),
 
   // Explicit join table replacing the orgIds array-field scan.
   // Convex cannot index array fields for membership queries, so we maintain
@@ -94,20 +95,28 @@ export default defineSchema({
 
   meeting_invites: defineTable({
     meetingId: v.id("meetings"),
-    orgId: v.optional(v.string()),
+    orgId: v.string(),
     email: v.string(),
+    invitedUserTokenIdentifier: v.optional(v.string()),
     role: meetingRoleValidator,
     invitedByTokenIdentifier: v.string(),
-    invitedByName: v.optional(v.string()),
-    invitedUserTokenIdentifier: v.optional(v.string()),
+    invitedByName: v.string(),
     // Backwards-compatible fields from legacy invite rows.
     token: v.optional(v.string()),
     sentAt: v.optional(v.number()),
-    emailDeliveryStatus: v.optional(v.string()),
+    emailDeliveryStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("sent"),
+        v.literal("skipped"),
+        v.literal("failed"),
+      ),
+    ),
     status: v.optional(
       v.union(
         v.literal("pending"),
         v.literal("accepted"),
+        v.literal("declined"),
         v.literal("cancelled"),
         v.literal("expired"),
       ),
@@ -116,12 +125,20 @@ export default defineSchema({
     lastSentAt: v.optional(v.number()),
     lastNotificationAt: v.optional(v.number()),
     acceptedAt: v.optional(v.number()),
+    declinedAt: v.optional(v.number()),
     cancelledAt: v.optional(v.number()),
     respondedAt: v.optional(v.number()),
+    lastEmailAttemptAt: v.optional(v.number()),
+    lastEmailError: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_meetingId", ["meetingId"])
-    .index("by_meetingId_and_email", ["meetingId", "email"]),
+    .index("by_meetingId_and_email", ["meetingId", "email"])
+    .index("by_email", ["email"])
+    .index("by_orgId_and_email", ["orgId", "email"])
+    .index("by_invitedUserTokenIdentifier_and_createdAt", ["invitedUserTokenIdentifier", "createdAt"])
+    .index("by_invitedUserTokenIdentifier_and_orgId", ["invitedUserTokenIdentifier", "orgId"])
+    .index("by_invitedUserTokenIdentifier_and_meetingId", ["invitedUserTokenIdentifier", "meetingId"]),
 
   meeting_audit_logs: defineTable({
     meetingId: v.id("meetings"),
@@ -205,18 +222,18 @@ export default defineSchema({
   notifications: defineTable({
     userTokenIdentifier: v.string(),
     orgId: v.string(),
+    kind: v.optional(v.string()),
+    title: v.optional(v.string()),
     message: v.string(),
     link: v.optional(v.string()),
+    invitationId: v.optional(v.id("meeting_invites")),
+    meetingId: v.optional(v.id("meetings")),
     isRead: v.boolean(),
     createdAt: v.number(),
-    // Extended fields written by invite notifications
-    title: v.optional(v.string()),
-    kind: v.optional(v.string()),
-    meetingId: v.optional(v.string()),
-    invitationId: v.optional(v.string()),
   })
     .index("by_userTokenIdentifier_and_orgId", ["userTokenIdentifier", "orgId"])
-    .index("by_userTokenIdentifier_and_isRead", ["userTokenIdentifier", "isRead"]),
+    .index("by_userTokenIdentifier_and_isRead", ["userTokenIdentifier", "isRead"])
+    .index("by_userTokenIdentifier_and_invitationId", ["userTokenIdentifier", "invitationId"]),
 
   signals: defineTable({
     meetingId: v.id("meetings"),

@@ -2,11 +2,13 @@ import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { internal } from "../_generated/api";
 import {
   assertMeetingAccess,
   assertMeetingHost,
   assertOrgAccess,
   getIdentityName,
+  getUserRecordByEmail,
   hasMeetingInvite,
   hasOrgAccess,
   requireIdentity,
@@ -26,32 +28,12 @@ import {
   resolveJoinDecision,
   resolveParticipantPermissions,
 } from "../lib/meetingPermissions";
+import {
+  normalizeInviteEmailList,
+  resolveInviteStatus,
+} from "../lib/invitations";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-function normalizeInviteEmailList(emails: string[]) {
-  return [...new Set(
-    emails
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean),
-  )];
-}
-
-function resolveInviteStatus(
-  invite: {
-    status?: "pending" | "accepted" | "cancelled" | "expired";
-    expiresAt?: number;
-  },
-) {
-  const baseStatus = invite.status ?? "pending";
-  if (baseStatus === "cancelled" || baseStatus === "accepted" || baseStatus === "expired") {
-    return baseStatus;
-  }
-  if (typeof invite.expiresAt === "number" && invite.expiresAt < Date.now()) {
-    return "expired" as const;
-  }
-  return "pending" as const;
-}
 
 async function insertAuditLog(
   ctx: MutationCtx,
@@ -74,6 +56,137 @@ async function insertAuditLog(
     targetName: args.targetName,
     metadata: args.metadata,
     createdAt: Date.now(),
+  });
+}
+
+async function getOrganizationName(ctx: MutationCtx, orgId: string) {
+  const organization = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", orgId))
+    .unique();
+
+  return organization?.name ?? "Workspace";
+}
+
+async function createOrRefreshInviteNotification(
+  ctx: MutationCtx,
+  args: {
+    inviteId: Id<"meeting_invites">;
+    meetingId: Id<"meetings">;
+    orgId: string;
+    userTokenIdentifier: string;
+    meetingTitle: string;
+    inviterName: string;
+  },
+) {
+  const existing = await ctx.db
+    .query("notifications")
+    .withIndex("by_userTokenIdentifier_and_invitationId", (q) =>
+      q
+        .eq("userTokenIdentifier", args.userTokenIdentifier)
+        .eq("invitationId", args.inviteId),
+    )
+    .unique();
+
+  const payload = {
+    kind: "meeting_invitation",
+    title: "Meeting invitation",
+    message: `You’ve been invited to ${args.meetingTitle} by ${args.inviterName}`,
+    link: `/invitations?invite=${args.inviteId}`,
+    invitationId: args.inviteId,
+    meetingId: args.meetingId,
+    isRead: false,
+    createdAt: Date.now(),
+  } as const;
+
+  if (existing) {
+    await ctx.db.patch(existing._id, payload);
+    return existing._id;
+  }
+
+  return await ctx.db.insert("notifications", {
+    userTokenIdentifier: args.userTokenIdentifier,
+    orgId: args.orgId,
+    ...payload,
+  });
+}
+
+async function deliverInvite(
+  ctx: MutationCtx,
+  args: {
+    inviteId: Id<"meeting_invites">;
+    meetingId: Id<"meetings">;
+    orgId: string;
+    meetingTitle: string;
+    inviterName: string;
+    email: string;
+    scheduledFor?: number;
+  },
+) {
+  const invitedUser = await getUserRecordByEmail(ctx, args.email);
+  if (invitedUser) {
+    await createOrRefreshInviteNotification(ctx, {
+      inviteId: args.inviteId,
+      meetingId: args.meetingId,
+      orgId: args.orgId,
+      userTokenIdentifier: invitedUser.tokenIdentifier,
+      meetingTitle: args.meetingTitle,
+      inviterName: args.inviterName,
+    });
+  }
+
+  await ctx.db.patch(args.inviteId, {
+    invitedUserTokenIdentifier: invitedUser?.tokenIdentifier,
+    lastNotificationAt: invitedUser ? Date.now() : undefined,
+    emailDeliveryStatus:
+      process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL
+        ? "pending"
+        : "skipped",
+  });
+
+  const organizationName = await getOrganizationName(ctx, args.orgId);
+  const appBaseUrl = process.env.APP_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "";
+  if (process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL) {
+    await ctx.scheduler.runAfter(0, internal.invitationsDelivery.sendMeetingInviteEmail, {
+      inviteId: args.inviteId,
+      toEmail: args.email,
+      meetingTitle: args.meetingTitle,
+      organizerName: args.inviterName,
+      organizationName,
+      meetingLink: `${appBaseUrl}/invitations?invite=${args.inviteId}`,
+      scheduledFor: args.scheduledFor,
+    });
+  }
+}
+
+async function archiveInviteNotifications(
+  ctx: MutationCtx,
+  args: {
+    inviteId: Id<"meeting_invites">;
+    message: string;
+  },
+) {
+  const invite = await ctx.db.get(args.inviteId);
+  if (!invite?.invitedUserTokenIdentifier) {
+    return;
+  }
+
+  const notification = await ctx.db
+    .query("notifications")
+    .withIndex("by_userTokenIdentifier_and_invitationId", (q) =>
+      q
+        .eq("userTokenIdentifier", invite.invitedUserTokenIdentifier!)
+        .eq("invitationId", args.inviteId),
+    )
+    .unique();
+
+  if (!notification) {
+    return;
+  }
+
+  await ctx.db.patch(notification._id, {
+    message: args.message,
+    isRead: true,
   });
 }
 
@@ -141,17 +254,36 @@ export const create = mutation({
     const inviteEmails = normalizeInviteEmailList(args.inviteEmails ?? []);
 
     for (const email of inviteEmails) {
-      await ctx.db.insert("meeting_invites", {
+      const inviteId = await ctx.db.insert("meeting_invites", {
         meetingId,
+        orgId: args.orgId,
         email,
+        invitedUserTokenIdentifier: undefined,
         role: "participant",
         invitedByTokenIdentifier: identity.tokenIdentifier,
+        invitedByName: getIdentityName(identity),
         status: "pending",
         expiresAt: now + INVITE_TTL_MS,
         lastSentAt: now,
         acceptedAt: undefined,
+        declinedAt: undefined,
         cancelledAt: undefined,
+        respondedAt: undefined,
+        lastNotificationAt: undefined,
+        emailDeliveryStatus: "pending",
+        lastEmailAttemptAt: undefined,
+        lastEmailError: undefined,
         createdAt: now,
+      });
+
+      await deliverInvite(ctx, {
+        inviteId,
+        meetingId,
+        orgId: args.orgId,
+        meetingTitle: args.title,
+        inviterName: getIdentityName(identity),
+        email,
+        scheduledFor: args.scheduledFor,
       });
     }
 
@@ -196,6 +328,7 @@ export const get = query({
       ctx,
       args.meetingId,
       identity.email ?? null,
+      identity.tokenIdentifier,
     );
     const participants = await listActiveParticipants(ctx, args.meetingId);
     const waitingRoom = hasMeetingPermission(meeting, participant, "canAdmitOthers")
@@ -336,20 +469,70 @@ export const inviteParticipants = mutation({
         .unique();
 
       if (existing) {
+        const resolvedStatus = resolveInviteStatus(existing);
+        if (resolvedStatus === "accepted" || resolvedStatus === "pending") {
+          continue;
+        }
+
+        await ctx.db.patch(existing._id, {
+          role,
+          invitedUserTokenIdentifier: existing.invitedUserTokenIdentifier,
+          invitedByTokenIdentifier: identity.tokenIdentifier,
+          invitedByName: getIdentityName(identity),
+          status: "pending",
+          expiresAt: now + INVITE_TTL_MS,
+          lastSentAt: now,
+          declinedAt: undefined,
+          cancelledAt: undefined,
+          respondedAt: undefined,
+          lastNotificationAt: undefined,
+          emailDeliveryStatus: "pending",
+          lastEmailAttemptAt: undefined,
+          lastEmailError: undefined,
+        });
+
+        await deliverInvite(ctx, {
+          inviteId: existing._id,
+          meetingId: args.meetingId,
+          orgId: meeting.orgId,
+          meetingTitle: meeting.title,
+          inviterName: participant?.name ?? getIdentityName(identity),
+          email,
+          scheduledFor: meeting.scheduledFor,
+        });
+        inserted.push(email);
         continue;
       }
 
-      await ctx.db.insert("meeting_invites", {
+      const inviteId = await ctx.db.insert("meeting_invites", {
         meetingId: args.meetingId,
+        orgId: meeting.orgId,
         email,
+        invitedUserTokenIdentifier: undefined,
         role,
         invitedByTokenIdentifier: identity.tokenIdentifier,
+        invitedByName: participant?.name ?? getIdentityName(identity),
         status: "pending",
         expiresAt: now + INVITE_TTL_MS,
         lastSentAt: now,
         acceptedAt: undefined,
+        declinedAt: undefined,
         cancelledAt: undefined,
+        respondedAt: undefined,
+        lastNotificationAt: undefined,
+        emailDeliveryStatus: "pending",
+        lastEmailAttemptAt: undefined,
+        lastEmailError: undefined,
         createdAt: now,
+      });
+      await deliverInvite(ctx, {
+        inviteId,
+        meetingId: args.meetingId,
+        orgId: meeting.orgId,
+        meetingTitle: meeting.title,
+        inviterName: participant?.name ?? getIdentityName(identity),
+        email,
+        scheduledFor: meeting.scheduledFor,
       });
       inserted.push(email);
     }
@@ -430,7 +613,22 @@ export const resendInvite = mutation({
       status: "pending",
       expiresAt: now + INVITE_TTL_MS,
       lastSentAt: now,
+      declinedAt: undefined,
+      respondedAt: undefined,
       cancelledAt: undefined,
+      emailDeliveryStatus: "pending",
+      lastEmailAttemptAt: undefined,
+      lastEmailError: undefined,
+    });
+
+    await deliverInvite(ctx, {
+      inviteId: args.inviteId,
+      meetingId: args.meetingId,
+      orgId: meeting.orgId,
+      meetingTitle: meeting.title,
+      inviterName: participant?.name ?? getIdentityName(identity),
+      email: invite.email,
+      scheduledFor: meeting.scheduledFor,
     });
 
     await insertAuditLog(ctx, {
@@ -475,6 +673,12 @@ export const cancelInvite = mutation({
     await ctx.db.patch(args.inviteId, {
       status: "cancelled",
       cancelledAt: now,
+      respondedAt: now,
+    });
+
+    await archiveInviteNotifications(ctx, {
+      inviteId: args.inviteId,
+      message: `Meeting invite revoked for ${invite.email}`,
     });
 
     await insertAuditLog(ctx, {

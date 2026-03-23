@@ -2,6 +2,7 @@ import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { getMeetingPageAccess } from "./meetingPermissions";
 import { getMeetingParticipant } from "./meetinghelpers";
+import { normalizeInviteEmail, resolveInviteStatus } from "./invitations";
 
 type ConvexCtx = QueryCtx | MutationCtx;
 
@@ -41,6 +42,20 @@ export async function getCurrentUserRecord(
   return await ctx.db
     .query("users")
     .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+    .unique();
+}
+
+export async function getUserRecordByEmail(
+  ctx: ConvexCtx,
+  email: string | null | undefined,
+) {
+  if (!email) {
+    return null;
+  }
+
+  return await ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", normalizeInviteEmail(email)))
     .unique();
 }
 
@@ -107,12 +122,29 @@ export async function hasMeetingInvite(
   ctx: ConvexCtx,
   meetingId: Id<"meetings">,
   email: string | null | undefined,
+  tokenIdentifier?: string | null,
 ) {
+  if (tokenIdentifier) {
+    const inviteByUser = await ctx.db
+      .query("meeting_invites")
+      .withIndex("by_invitedUserTokenIdentifier_and_meetingId", (q) =>
+        q.eq("invitedUserTokenIdentifier", tokenIdentifier).eq("meetingId", meetingId),
+      )
+      .unique();
+
+    if (inviteByUser) {
+      const status = resolveInviteStatus(inviteByUser);
+      if (status === "pending" || status === "accepted") {
+        return true;
+      }
+    }
+  }
+
   if (!email) {
     return false;
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeInviteEmail(email);
   const invite = await ctx.db
     .query("meeting_invites")
     .withIndex("by_meetingId_and_email", (q) =>
@@ -124,16 +156,8 @@ export async function hasMeetingInvite(
     return false;
   }
 
-  const status = invite.status ?? "pending";
-  const isExpired = typeof invite.expiresAt === "number" && invite.expiresAt < Date.now();
-  if (status === "cancelled") {
-    return false;
-  }
-  if (status === "expired" || isExpired) {
-    return false;
-  }
-
-  return true;
+  const status = resolveInviteStatus(invite);
+  return status === "pending" || status === "accepted";
 }
 
 export async function assertMeetingAccess(
@@ -149,7 +173,7 @@ export async function assertMeetingAccess(
   const user = await getCurrentUserRecord(ctx, tokenIdentifier);
   const participant = await getMeetingParticipant(ctx, meetingId, tokenIdentifier);
   const isOrgMember = await hasOrgAccess(ctx, tokenIdentifier, meeting.orgId);
-  const isInvited = await hasMeetingInvite(ctx, meetingId, user?.email ?? null);
+  const isInvited = await hasMeetingInvite(ctx, meetingId, user?.email ?? null, tokenIdentifier);
 
   if (
     !getMeetingPageAccess({

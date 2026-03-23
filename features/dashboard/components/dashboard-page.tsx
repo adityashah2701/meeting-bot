@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { useOrganization } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
-import { Activity, CalendarDays, CheckSquare, FileText, Radio, Sparkles, X } from "lucide-react";
+import { Activity, CalendarDays, CheckSquare, FileText, Inbox, Radio } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LoadingBlock } from "@/components/shared/loading-block";
 import { dashboardService } from "@/features/dashboard/services/dashboard-service";
+import { invitationService } from "@/features/invitations/services/invitation-service";
 
 const statConfig = [
   { key: "totalMeetings", label: "Meetings", icon: CalendarDays },
@@ -22,6 +22,10 @@ export function DashboardPage() {
   const { organization } = useOrganization();
   const overview = useQuery(
     dashboardService.getOverview,
+    organization?.id ? { orgId: organization.id } : "skip",
+  );
+  const invitations = useQuery(
+    invitationService.listMyInvitations,
     organization?.id ? { orgId: organization.id } : "skip",
   );
 
@@ -134,6 +138,59 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-border">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Invitation inbox</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              New meeting invites land here instantly, with direct accept and join actions.
+            </p>
+          </div>
+          <Button variant="outline" asChild>
+            <Link href="/invitations">Open inbox</Link>
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {invitations === undefined ? (
+            <LoadingBlock className="h-40 w-full" />
+          ) : invitations.length === 0 ? (
+            <EmptyState
+              title="No invitations yet"
+              description="When someone invites you to a meeting, it will appear here immediately."
+            />
+          ) : (
+            invitations.slice(0, 3).map((invite) => (
+              <div
+                key={invite._id}
+                className="flex flex-col gap-3 border border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Inbox className="h-4 w-4 text-muted-foreground" />
+                    <p className="font-medium text-foreground">{invite.meetingTitle}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {invite.organizerName} · {invite.organizationName}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {invite.invitationStatus === "pending" ? (
+                    <Button size="sm" asChild>
+                      <Link href={`/invitations?invite=${invite._id}`}>Review invite</Link>
+                    </Button>
+                  ) : null}
+                  {invite.canJoin ? (
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href={invite.joinLink}>Join</Link>
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

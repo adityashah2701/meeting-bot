@@ -11,7 +11,11 @@
 import type * as dashboard_index from "../dashboard/index.js";
 import type * as http from "../http.js";
 import type * as insights_index from "../insights/index.js";
+import type * as invitationEmailState from "../invitationEmailState.js";
+import type * as invitations_index from "../invitations/index.js";
+import type * as invitationsDelivery from "../invitationsDelivery.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_invitations from "../lib/invitations.js";
 import type * as lib_meetingPermissions from "../lib/meetingPermissions.js";
 import type * as lib_meetinghelpers from "../lib/meetinghelpers.js";
 import type * as meetings_index from "../meetings/index.js";
@@ -36,7 +40,11 @@ declare const fullApi: ApiFromModules<{
   "dashboard/index": typeof dashboard_index;
   http: typeof http;
   "insights/index": typeof insights_index;
+  invitationEmailState: typeof invitationEmailState;
+  "invitations/index": typeof invitations_index;
+  invitationsDelivery: typeof invitationsDelivery;
   "lib/auth": typeof lib_auth;
+  "lib/invitations": typeof lib_invitations;
   "lib/meetingPermissions": typeof lib_meetingPermissions;
   "lib/meetinghelpers": typeof lib_meetinghelpers;
   "meetings/index": typeof meetings_index;

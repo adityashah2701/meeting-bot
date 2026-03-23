@@ -102,8 +102,9 @@ function joinModeLabel(joinMode: MeetingJoinMode) {
   }
 }
 
-function inviteStatusLabel(status: "pending" | "accepted" | "expired" | "cancelled") {
+function inviteStatusLabel(status: "pending" | "accepted" | "declined" | "expired" | "cancelled") {
   if (status === "accepted") return "Accepted";
+  if (status === "declined") return "Declined";
   if (status === "expired") return "Expired";
   if (status === "cancelled") return "Cancelled";
   return "Pending";

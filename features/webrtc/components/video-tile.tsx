@@ -108,7 +108,7 @@ export function VideoTile({
               )}
             >
               <Avatar className="size-16 shadow-md">
-                <AvatarImage alt={name} src={imageUrl} />
+                <AvatarImage className="rounded-[100%]!" alt={name} src={imageUrl} />
                 <AvatarFallback className="bg-primary/20 text-base font-semibold text-primary">
                   {initials || "?"}
                 </AvatarFallback>

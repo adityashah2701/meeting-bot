@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useOrganization } from "@clerk/nextjs";
 import { AppSidebar } from "@/components/shared/app-sidebar";
 import { LoadingBlock } from "@/components/shared/loading-block";
@@ -10,16 +11,37 @@ import { CreateMeetingDialog } from "@/features/meeting/components/create-meetin
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isLoaded, organization } = useOrganization();
+  const isInvitationRoute = pathname.startsWith("/invitations");
 
   useEffect(() => {
-    if (isLoaded && !organization) {
+    if (isLoaded && !organization && !isInvitationRoute) {
       router.push("/onboarding");
     }
-  }, [isLoaded, organization, router]);
+  }, [isInvitationRoute, isLoaded, organization, router]);
 
   if (!isLoaded) {
     return <div className="p-8"><LoadingBlock className="h-96 w-full" /></div>;
+  }
+
+  if (!organization && isInvitationRoute) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="flex h-16 items-center justify-between border-b border-border px-4 lg:px-6">
+          <div>
+            <p className="text-sm font-medium text-foreground">Invitations</p>
+            <p className="text-xs text-muted-foreground">
+              Review invites even before joining a workspace
+            </p>
+          </div>
+          <Link href="/onboarding" className="text-sm text-primary hover:underline">
+            Join a workspace
+          </Link>
+        </header>
+        <main className="p-4 lg:p-6">{children}</main>
+      </div>
+    );
   }
 
   return (

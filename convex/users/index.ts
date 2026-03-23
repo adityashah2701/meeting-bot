@@ -1,6 +1,7 @@
 import { internalMutation, mutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireIdentity } from "../lib/auth";
+import { resolveInviteStatus } from "../lib/invitations";
 
 export const upsertUser = internalMutation({
   args: {
@@ -265,7 +266,55 @@ export const syncUser = mutation({
           orgId,
         });
       }
+
+      if (!updates.email) {
+        continue;
+      }
+
+      const pendingInvites = await ctx.db
+        .query("meeting_invites")
+        .withIndex("by_orgId_and_email", (q) =>
+          q.eq("orgId", orgId).eq("email", updates.email),
+        )
+        .take(100);
+
+      for (const invite of pendingInvites) {
+        const status = resolveInviteStatus(invite);
+        if (status === "cancelled" || status === "expired") {
+          continue;
+        }
+
+        await ctx.db.patch(invite._id, {
+          invitedUserTokenIdentifier: tokenIdentifier,
+        });
+
+        const existingNotification = await ctx.db
+          .query("notifications")
+          .withIndex("by_userTokenIdentifier_and_invitationId", (q) =>
+            q.eq("userTokenIdentifier", tokenIdentifier).eq("invitationId", invite._id),
+          )
+          .unique();
+
+        if (!existingNotification) {
+          const meeting = await ctx.db.get(invite.meetingId);
+          if (!meeting) {
+            continue;
+          }
+
+          await ctx.db.insert("notifications", {
+            userTokenIdentifier: tokenIdentifier,
+            orgId,
+            kind: "meeting_invitation",
+            title: "Meeting invitation",
+            message: `You’ve been invited to ${meeting.title} by ${invite.invitedByName}`,
+            link: `/invitations?invite=${invite._id}`,
+            invitationId: invite._id,
+            meetingId: invite.meetingId,
+            isRead: false,
+            createdAt: Date.now(),
+          });
+        }
+      }
     }
   },
 });
-

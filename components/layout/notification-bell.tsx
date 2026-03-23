@@ -1,9 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@/convex/_generated/api';
 import { useOrganization, useUser } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Bell } from 'lucide-react';
 import {
   DropdownMenu,
@@ -18,12 +20,47 @@ import Link from 'next/link';
 export function NotificationBell() {
   const { organization } = useOrganization();
   const { user } = useUser();
+  const router = useRouter();
   const markRead = useMutation(api.notifications.index.markRead);
+  const hasHydratedRef = useRef(false);
+  const seenNotificationIdsRef = useRef(new Set<string>());
 
   const notifications = useQuery(
     api.notifications.index.list,
     organization?.id ? { orgId: organization.id } : "skip"
   );
+
+  useEffect(() => {
+    if (!organization || !user || !notifications) {
+      return;
+    }
+
+    if (!hasHydratedRef.current) {
+      notifications.forEach((notification) => {
+        seenNotificationIdsRef.current.add(notification._id);
+      });
+      hasHydratedRef.current = true;
+      return;
+    }
+
+    notifications.forEach((notification) => {
+      if (seenNotificationIdsRef.current.has(notification._id)) {
+        return;
+      }
+
+      seenNotificationIdsRef.current.add(notification._id);
+      if (!notification.isRead && notification.kind === "meeting_invitation") {
+        toast.message(notification.message, {
+          action: notification.link
+            ? {
+                label: "Open",
+                onClick: () => router.push(notification.link!),
+              }
+            : undefined,
+        });
+      }
+    });
+  }, [notifications, organization, router, user]);
 
   if (!organization || !user) return null;
 
@@ -57,14 +94,22 @@ export function NotificationBell() {
                   className={`flex flex-col gap-1 px-4 py-3 ${!n.isRead ? 'bg-primary/5' : ''}`}
                   onClick={() => {
                     if (!n.isRead) markRead({ notificationId: n._id });
+                    if (n.link) {
+                      router.push(n.link);
+                    }
                   }}
                 >
+                  {n.title ? (
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      {n.title}
+                    </span>
+                  ) : null}
                   <span className={`text-sm ${!n.isRead ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
                     {n.message}
                   </span>
                   {n.link && (
-                    <Link href={n.link} className="text-xs text-primary hover:underline mt-1">
-                      View Meeting
+                    <Link href={n.link} className="text-xs text-primary hover:underline mt-1" onClick={(event) => event.stopPropagation()}>
+                      {n.kind === "meeting_invitation" ? "Open invitation" : "View Meeting"}
                     </Link>
                   )}
                   <span className="text-[10px] text-muted-foreground mt-1">

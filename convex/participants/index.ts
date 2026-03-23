@@ -10,6 +10,7 @@ import {
   hasOrgAccess,
   requireIdentity,
 } from "../lib/auth";
+import { normalizeInviteEmail, resolveInviteStatus } from "../lib/invitations";
 import {
   getMeetingParticipant,
   listAllMeetingParticipants,
@@ -123,7 +124,7 @@ async function getInviteRole(
   const invite = await ctx.db
     .query("meeting_invites")
     .withIndex("by_meetingId_and_email", (q) =>
-      q.eq("meetingId", meetingId).eq("email", email.trim().toLowerCase()),
+      q.eq("meetingId", meetingId).eq("email", normalizeInviteEmail(email)),
     )
     .unique();
 
@@ -131,9 +132,8 @@ async function getInviteRole(
     return null;
   }
 
-  const status = invite.status ?? "pending";
-  const isExpired = typeof invite.expiresAt === "number" && invite.expiresAt < Date.now();
-  if (status === "cancelled" || status === "expired" || isExpired) {
+  const status = resolveInviteStatus(invite);
+  if (status === "cancelled" || status === "expired" || status === "declined") {
     return null;
   }
 
@@ -168,6 +168,7 @@ export const join = mutation({
       ctx,
       args.meetingId,
       identity.email ?? user?.email ?? null,
+      identity.tokenIdentifier,
     );
     const decision = resolveJoinDecision({
       meeting,
@@ -253,10 +254,11 @@ export const join = mutation({
       lastActivityAt: now,
     });
 
-    if (invite && decision.status === "joined" && (invite.status ?? "pending") !== "accepted") {
+    if (invite && decision.status === "joined" && resolveInviteStatus(invite) !== "accepted") {
       await ctx.db.patch(invite._id, {
         status: "accepted",
         acceptedAt: now,
+        respondedAt: now,
       });
     }
 
