@@ -9,7 +9,10 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  return createMeetingMetadata(`Meeting ${id}`, "Review transcript history and AI summary for this meeting.");
+  return createMeetingMetadata(
+    `Meeting ${id}`,
+    "Review transcript history and AI summary for this meeting.",
+  );
 }
 
 export default async function MeetingDetailsRoute({

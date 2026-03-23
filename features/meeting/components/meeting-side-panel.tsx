@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import {
   CheckCircle2,
@@ -69,7 +70,7 @@ const DEFAULT_SETTINGS: MeetingSettings = {
   allowScreenShare: true,
   allowChat: true,
   allowReactions: true,
-  allowRecording: false,
+  allowRecording: true,
   allowParticipantsToUnmute: true,
   autoAdmitOrgUsers: true,
   lobbyEnabled: false,
@@ -115,6 +116,12 @@ function parseInviteEmails(value: string) {
       .map((entry) => entry.trim().toLowerCase())
       .filter(Boolean),
   )];
+}
+
+function withoutNodeProp<T extends { node?: unknown }>(props: T) {
+  const { node, ...rest } = props;
+  void node;
+  return rest;
 }
 
 export function MeetingSidePanel({
@@ -388,7 +395,37 @@ export function MeetingSidePanel({
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Overview
                     </p>
-                    <p className="whitespace-pre-wrap leading-relaxed text-foreground">{displaySummary}</p>
+                    <ReactMarkdown
+                      components={{
+                        h1: (props) => (
+                          <h1 className="mb-3 text-lg font-semibold text-foreground" {...withoutNodeProp(props)} />
+                        ),
+                        h2: (props) => (
+                          <h2 className="mb-2 mt-4 text-sm font-semibold text-foreground" {...withoutNodeProp(props)} />
+                        ),
+                        h3: (props) => (
+                          <h3 className="mb-1.5 mt-3 text-sm font-semibold text-foreground" {...withoutNodeProp(props)} />
+                        ),
+                        p: (props) => (
+                          <p
+                            className="mb-2 whitespace-pre-wrap leading-relaxed text-foreground last:mb-0"
+                            {...withoutNodeProp(props)}
+                          />
+                        ),
+                        ul: (props) => (
+                          <ul className="mb-2 list-disc space-y-1.5 pl-5 text-foreground" {...withoutNodeProp(props)} />
+                        ),
+                        ol: (props) => (
+                          <ol className="mb-2 list-decimal space-y-1.5 pl-5 text-foreground" {...withoutNodeProp(props)} />
+                        ),
+                        li: (props) => <li className="leading-relaxed" {...withoutNodeProp(props)} />,
+                        strong: (props) => (
+                          <strong className="font-semibold text-foreground" {...withoutNodeProp(props)} />
+                        ),
+                      }}
+                    >
+                      {displaySummary}
+                    </ReactMarkdown>
                   </div>
                 ) : null}
 

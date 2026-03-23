@@ -16,6 +16,7 @@ export const meetingService = {
   saveSummary: api.meetings.index.saveSummary,
   startRecording: api.recordings.index.start,
   stopRecording: api.recordings.index.stop,
+  generateRecordingUploadUrl: api.recordings.index.generateUploadUrl,
   markRecordingReady: api.recordings.index.markReady,
   markRecordingFailed: api.recordings.index.markFailed,
   listRecordings: api.recordings.index.listByMeeting,

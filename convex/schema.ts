@@ -1,4 +1,4 @@
-import { defineSchema, defineTable } from "convex/server";
+﻿import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {
   meetingParticipantStatusValidator,
@@ -94,12 +94,16 @@ export default defineSchema({
 
   meeting_invites: defineTable({
     meetingId: v.id("meetings"),
+    orgId: v.optional(v.string()),
     email: v.string(),
     role: meetingRoleValidator,
     invitedByTokenIdentifier: v.string(),
+    invitedByName: v.optional(v.string()),
+    invitedUserTokenIdentifier: v.optional(v.string()),
     // Backwards-compatible fields from legacy invite rows.
     token: v.optional(v.string()),
     sentAt: v.optional(v.number()),
+    emailDeliveryStatus: v.optional(v.string()),
     status: v.optional(
       v.union(
         v.literal("pending"),
@@ -110,8 +114,10 @@ export default defineSchema({
     ),
     expiresAt: v.optional(v.number()),
     lastSentAt: v.optional(v.number()),
+    lastNotificationAt: v.optional(v.number()),
     acceptedAt: v.optional(v.number()),
     cancelledAt: v.optional(v.number()),
+    respondedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_meetingId", ["meetingId"])
@@ -181,9 +187,12 @@ export default defineSchema({
       v.literal("ready"),
       v.literal("failed"),
     ),
+    storageId: v.optional(v.id("_storage")),
     storageProvider: v.optional(v.string()),
     storageLocation: v.optional(v.string()),
     playbackUrl: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    containerFormat: v.optional(v.string()),
     transcriptAssetId: v.optional(v.id("meeting_assets")),
     summaryAssetId: v.optional(v.id("meeting_assets")),
     errorMessage: v.optional(v.string()),
@@ -200,6 +209,11 @@ export default defineSchema({
     link: v.optional(v.string()),
     isRead: v.boolean(),
     createdAt: v.number(),
+    // Extended fields written by invite notifications
+    title: v.optional(v.string()),
+    kind: v.optional(v.string()),
+    meetingId: v.optional(v.string()),
+    invitationId: v.optional(v.string()),
   })
     .index("by_userTokenIdentifier_and_orgId", ["userTokenIdentifier", "orgId"])
     .index("by_userTokenIdentifier_and_isRead", ["userTokenIdentifier", "isRead"]),

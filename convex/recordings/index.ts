@@ -33,6 +33,16 @@ async function requireRecordingPermission(
   return { identity, meeting, participant };
 }
 
+export const generateUploadUrl = mutation({
+  args: {
+    meetingId: v.id("meetings"),
+  },
+  handler: async (ctx, args) => {
+    await requireRecordingPermission(ctx, args.meetingId);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
 export const start = mutation({
   args: {
     meetingId: v.id("meetings"),
@@ -65,9 +75,12 @@ export const start = mutation({
       stoppedAt: undefined,
       durationMs: undefined,
       status: "recording",
+      storageId: undefined,
       storageProvider: args.storageProvider ?? undefined,
       storageLocation: undefined,
       playbackUrl: undefined,
+      mimeType: undefined,
+      containerFormat: undefined,
       transcriptAssetId: undefined,
       summaryAssetId: undefined,
       errorMessage: undefined,
@@ -81,9 +94,12 @@ export const stop = mutation({
   args: {
     meetingId: v.id("meetings"),
     recordingId: v.optional(v.id("meeting_recordings")),
+    storageId: v.optional(v.id("_storage")),
     storageProvider: v.optional(v.string()),
     storageLocation: v.optional(v.string()),
     playbackUrl: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    containerFormat: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRecordingPermission(ctx, args.meetingId);
@@ -110,9 +126,12 @@ export const stop = mutation({
       stoppedAt: now,
       durationMs: Math.max(0, now - recording.startedAt),
       status: "processing",
+      storageId: args.storageId ?? recording.storageId,
       storageProvider: args.storageProvider ?? recording.storageProvider,
       storageLocation: args.storageLocation ?? recording.storageLocation,
       playbackUrl: args.playbackUrl ?? recording.playbackUrl,
+      mimeType: args.mimeType ?? recording.mimeType,
+      containerFormat: args.containerFormat ?? recording.containerFormat,
       updatedAt: now,
     });
 
@@ -124,9 +143,12 @@ export const markReady = mutation({
   args: {
     meetingId: v.id("meetings"),
     recordingId: v.id("meeting_recordings"),
+    storageId: v.optional(v.id("_storage")),
     playbackUrl: v.optional(v.string()),
     storageProvider: v.optional(v.string()),
     storageLocation: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    containerFormat: v.optional(v.string()),
     transcriptAssetId: v.optional(v.id("meeting_assets")),
     summaryAssetId: v.optional(v.id("meeting_assets")),
   },
@@ -137,11 +159,24 @@ export const markReady = mutation({
       throw new Error("Recording not found");
     }
 
+    const resolvedStorageId = args.storageId ?? recording.storageId;
+    const playbackFromStorage = resolvedStorageId
+      ? await ctx.storage.getUrl(resolvedStorageId)
+      : null;
+
     await ctx.db.patch(args.recordingId, {
       status: "ready",
-      playbackUrl: args.playbackUrl ?? recording.playbackUrl,
+      playbackUrl:
+        args.playbackUrl ??
+        playbackFromStorage ??
+        recording.playbackUrl,
+      storageId: resolvedStorageId,
       storageProvider: args.storageProvider ?? recording.storageProvider,
-      storageLocation: args.storageLocation ?? recording.storageLocation,
+      storageLocation:
+        args.storageLocation ??
+        (resolvedStorageId ? String(resolvedStorageId) : recording.storageLocation),
+      mimeType: args.mimeType ?? recording.mimeType,
+      containerFormat: args.containerFormat ?? recording.containerFormat,
       transcriptAssetId: args.transcriptAssetId ?? recording.transcriptAssetId,
       summaryAssetId: args.summaryAssetId ?? recording.summaryAssetId,
       errorMessage: undefined,
@@ -181,10 +216,22 @@ export const listByMeeting = query({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
-    return await ctx.db
+    const recordings = await ctx.db
       .query("meeting_recordings")
       .withIndex("by_meetingId_and_createdAt", (q) => q.eq("meetingId", args.meetingId))
       .order("desc")
       .take(100);
+
+    return await Promise.all(
+      recordings.map(async (recording) => {
+        const freshPlaybackUrl = recording.storageId
+          ? await ctx.storage.getUrl(recording.storageId)
+          : null;
+        return {
+          ...recording,
+          playbackUrl: freshPlaybackUrl ?? recording.playbackUrl,
+        };
+      }),
+    );
   },
 });

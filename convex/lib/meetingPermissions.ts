@@ -108,7 +108,7 @@ export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   allowScreenShare: true,
   allowChat: true,
   allowReactions: true,
-  allowRecording: false,
+  allowRecording: true,
   allowParticipantsToUnmute: true,
   autoAdmitOrgUsers: true,
   lobbyEnabled: false,
@@ -212,7 +212,7 @@ export function resolveParticipantPermissions(
     resolved.canSendChat = false;
   }
 
-  if (!meeting.settings.allowRecording) {
+  if (!meeting.settings.allowRecording && !isPrivilegedMeetingRole(participant.role)) {
     resolved.canStartRecording = false;
   }
 
