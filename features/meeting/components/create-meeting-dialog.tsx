@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useOrganization } from "@clerk/nextjs";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,7 @@ import {
   meetingService,
   scheduleMeeting,
 } from "@/features/meeting/services/meeting-service";
+import { integrationsService } from "@/features/integrations/services/integrations-service";
 import { MeetingFormInstant } from "@/features/meeting/components/meeting-form-instant";
 import { MeetingFormSchedule } from "@/features/meeting/components/meeting-form-schedule";
 
@@ -43,6 +44,10 @@ export function CreateMeetingDialog({
   const router = useRouter();
   const { organization } = useOrganization();
   const createMeeting = useMutation(meetingService.createMeeting);
+  const googleCalendarConnection = useQuery(
+    integrationsService.getGoogleCalendarConnection,
+    organization?.id ? { orgId: organization.id } : "skip",
+  );
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("instant");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,6 +61,13 @@ export function CreateMeetingDialog({
 
     return organization.id;
   };
+
+  const connectGoogleCalendarHref = organization?.id
+    ? `/api/integrations/google/start?${new URLSearchParams({
+        orgId: organization.id,
+        returnTo: "/integrations",
+      }).toString()}`
+    : undefined;
 
   const handleInstantSubmit = async (values: { title: string }) => {
     const orgId = requireOrganization();
@@ -74,8 +86,10 @@ export function CreateMeetingDialog({
       setOpen(false);
       toast.success("Meeting started");
       router.push(`/meeting/${meetingId}`);
-    } catch {
-      toast.error("Unable to start meeting");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to start meeting",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -87,6 +101,8 @@ export function CreateMeetingDialog({
     date: string;
     time: string;
     agenda: string;
+    timeZone: string;
+    syncWithGoogleCalendar: boolean;
   }) => {
     const orgId = requireOrganization();
     if (!orgId) {
@@ -103,14 +119,18 @@ export function CreateMeetingDialog({
         description: values.description,
         agenda: values.agenda,
         scheduledFor,
+        scheduledTimeZone: values.timeZone,
+        syncWithGoogleCalendar: values.syncWithGoogleCalendar,
         inviteEmails: parseInviteEmails(inviteEmailsText),
       });
 
       setOpen(false);
       toast.success("Meeting scheduled");
       router.refresh();
-    } catch {
-      toast.error("Unable to schedule meeting");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to schedule meeting",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -148,6 +168,9 @@ export function CreateMeetingDialog({
 
           <TabsContent value="schedule" className="space-y-4">
             <MeetingFormSchedule
+              connectGoogleCalendarHref={connectGoogleCalendarHref}
+              googleCalendarAccountEmail={googleCalendarConnection?.accountEmail}
+              googleCalendarConnected={googleCalendarConnection?.connected === true}
               isSubmitting={isSubmitting && activeTab === "schedule"}
               onSubmit={handleScheduleSubmit}
             />

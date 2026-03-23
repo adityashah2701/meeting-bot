@@ -1,12 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 
 export function MeetingFormSchedule({
   onSubmit,
   isSubmitting,
+  googleCalendarConnected,
+  googleCalendarAccountEmail,
+  connectGoogleCalendarHref,
 }: {
   onSubmit: (values: {
     title: string;
@@ -14,14 +19,20 @@ export function MeetingFormSchedule({
     date: string;
     time: string;
     agenda: string;
+    timeZone: string;
+    syncWithGoogleCalendar: boolean;
   }) => Promise<void>;
   isSubmitting: boolean;
+  googleCalendarConnected: boolean;
+  googleCalendarAccountEmail?: string;
+  connectGoogleCalendarHref?: string;
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [agenda, setAgenda] = useState("");
+  const [syncWithGoogleCalendar, setSyncWithGoogleCalendar] = useState(false);
   const [errors, setErrors] = useState<{
     title?: string;
     dateTime?: string;
@@ -59,6 +70,8 @@ export function MeetingFormSchedule({
       date,
       time,
       agenda,
+      timeZone: timezone,
+      syncWithGoogleCalendar,
     });
   };
 
@@ -136,6 +149,37 @@ export function MeetingFormSchedule({
           onChange={(event) => setAgenda(event.target.value)}
           placeholder="Optional notes or agenda"
         />
+      </div>
+
+      <div className="border border-border bg-card/60 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              Google Calendar
+            </p>
+            <p className="text-sm text-foreground">
+              Create a matching calendar event when this meeting is scheduled.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {googleCalendarConnected
+                ? `Connected as ${googleCalendarAccountEmail ?? "your Google account"}`
+                : "Connect Google Calendar first to enable one-click scheduling sync."}
+            </p>
+          </div>
+          <Switch
+            checked={syncWithGoogleCalendar}
+            disabled={!googleCalendarConnected}
+            onCheckedChange={setSyncWithGoogleCalendar}
+          />
+        </div>
+
+        {!googleCalendarConnected && connectGoogleCalendarHref ? (
+          <div className="mt-3">
+            <Button asChild size="sm" variant="outline">
+              <Link href={connectGoogleCalendarHref}>Connect Google Calendar</Link>
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <p className="text-xs text-muted-foreground">Timezone: {timezone}</p>

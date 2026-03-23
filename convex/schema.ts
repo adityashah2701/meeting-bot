@@ -57,8 +57,17 @@ export default defineSchema({
     isLocked: v.boolean(),
     settings: meetingSettingsValidator,
     scheduledFor: v.optional(v.number()),
+    scheduledTimeZone: v.optional(v.string()),
     startedAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),
+    googleCalendarSyncRequested: v.optional(v.boolean()),
+    googleCalendarEventId: v.optional(v.string()),
+    googleCalendarEventUrl: v.optional(v.string()),
+    googleCalendarSyncStatus: v.optional(
+      v.union(v.literal("pending"), v.literal("synced"), v.literal("failed")),
+    ),
+    googleCalendarLastSyncedAt: v.optional(v.number()),
+    googleCalendarSyncError: v.optional(v.string()),
     lastActivityAt: v.number(),
   })
     .index("by_orgId", ["orgId"])
@@ -273,6 +282,26 @@ export default defineSchema({
     connected: v.boolean(),
     updatedAt: v.number(),
   }).index("by_orgId", ["orgId"]),
+
+  user_integrations: defineTable({
+    userTokenIdentifier: v.string(),
+    provider: v.literal("google_calendar"),
+    accountEmail: v.string(),
+    accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    scope: v.array(v.string()),
+    tokenExpiresAt: v.number(),
+    status: v.union(
+      v.literal("connected"),
+      v.literal("error"),
+      v.literal("revoked"),
+    ),
+    lastError: v.optional(v.string()),
+    connectedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userTokenIdentifier_and_provider", ["userTokenIdentifier", "provider"])
+    .index("by_provider_and_accountEmail", ["provider", "accountEmail"]),
 
   summary_chunks: defineTable({
     meetingId: v.id("meetings"),

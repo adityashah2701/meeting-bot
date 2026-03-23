@@ -11,6 +11,7 @@
 import type * as dashboard_index from "../dashboard/index.js";
 import type * as http from "../http.js";
 import type * as insights_index from "../insights/index.js";
+import type * as integrations_index from "../integrations/index.js";
 import type * as invitationEmailState from "../invitationEmailState.js";
 import type * as invitations_index from "../invitations/index.js";
 import type * as invitationsDelivery from "../invitationsDelivery.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   "dashboard/index": typeof dashboard_index;
   http: typeof http;
   "insights/index": typeof insights_index;
+  "integrations/index": typeof integrations_index;
   invitationEmailState: typeof invitationEmailState;
   "invitations/index": typeof invitations_index;
   invitationsDelivery: typeof invitationsDelivery;

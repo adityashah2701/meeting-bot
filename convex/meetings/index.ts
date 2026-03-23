@@ -197,6 +197,8 @@ export const create = mutation({
     purpose: v.optional(v.string()),
     description: v.optional(v.string()),
     scheduledFor: v.optional(v.number()),
+    scheduledTimeZone: v.optional(v.string()),
+    syncWithGoogleCalendar: v.optional(v.boolean()),
     settings: v.optional(meetingSettingsValidator),
     inviteEmails: v.optional(v.array(v.string())),
   },
@@ -207,6 +209,27 @@ export const create = mutation({
     const isScheduled =
       typeof args.scheduledFor === "number" && args.scheduledFor > now;
     const settings = getDefaultMeetingSettings(args.settings);
+    const shouldSyncWithGoogleCalendar =
+      isScheduled && args.syncWithGoogleCalendar === true;
+
+    if (args.syncWithGoogleCalendar && !isScheduled) {
+      throw new Error("Google Calendar sync is only available for scheduled meetings");
+    }
+
+    if (shouldSyncWithGoogleCalendar) {
+      const googleCalendarConnection = await ctx.db
+        .query("user_integrations")
+        .withIndex("by_userTokenIdentifier_and_provider", (q) =>
+          q
+            .eq("userTokenIdentifier", identity.tokenIdentifier)
+            .eq("provider", "google_calendar"),
+        )
+        .unique();
+
+      if (!googleCalendarConnection || googleCalendarConnection.status !== "connected") {
+        throw new Error("Connect Google Calendar before enabling calendar sync");
+      }
+    }
 
     const meetingId = await ctx.db.insert("meetings", {
       orgId: args.orgId,
@@ -222,7 +245,14 @@ export const create = mutation({
       isLocked: false,
       settings,
       scheduledFor: args.scheduledFor,
+      scheduledTimeZone: args.scheduledTimeZone,
       startedAt: isScheduled ? undefined : now,
+      googleCalendarSyncRequested: shouldSyncWithGoogleCalendar || undefined,
+      googleCalendarSyncStatus: shouldSyncWithGoogleCalendar ? "pending" : undefined,
+      googleCalendarEventId: undefined,
+      googleCalendarEventUrl: undefined,
+      googleCalendarLastSyncedAt: undefined,
+      googleCalendarSyncError: undefined,
       lastActivityAt: now,
     });
 
@@ -303,6 +333,14 @@ export const create = mutation({
         isRead: false,
         createdAt: now,
       });
+    }
+
+    if (shouldSyncWithGoogleCalendar) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.integrations.index.syncMeetingToGoogleCalendar,
+        { meetingId },
+      );
     }
 
     return meetingId;

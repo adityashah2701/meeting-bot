@@ -52,6 +52,8 @@ type CreateMeetingMutation = (args: {
   purpose?: string;
   description?: string;
   scheduledFor?: number;
+  scheduledTimeZone?: string;
+  syncWithGoogleCalendar?: boolean;
   settings?: {
     joinMode: "organization_only" | "invite_only" | "anyone_with_link" | "ask_to_join";
     allowScreenShare: boolean;
@@ -98,6 +100,8 @@ export async function scheduleMeeting(
     description?: string;
     agenda?: string;
     scheduledFor: number;
+    scheduledTimeZone?: string;
+    syncWithGoogleCalendar?: boolean;
     inviteEmails?: string[];
   },
 ) {
@@ -111,6 +115,8 @@ export async function scheduleMeeting(
     description,
     purpose: agenda || description || title,
     scheduledFor: args.scheduledFor,
+    scheduledTimeZone: args.scheduledTimeZone,
+    syncWithGoogleCalendar: args.syncWithGoogleCalendar,
     inviteEmails: args.inviteEmails,
   });
 }
