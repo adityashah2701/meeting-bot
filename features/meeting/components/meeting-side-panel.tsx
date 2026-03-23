@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -477,7 +477,7 @@ export function MeetingSidePanel({
                     Settings
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-10xl">
+                <DialogContent className="sm:max-w-2xl">
                   <DialogHeader>
                     <DialogTitle>Meeting settings</DialogTitle>
                     <DialogDescription>
@@ -485,76 +485,89 @@ export function MeetingSidePanel({
                     </DialogDescription>
                   </DialogHeader>
 
-                  {/* 3-column horizontal rectangular layout */}
-                  <div className="grid grid-cols-3 gap-6 pt-2">
+                  <Tabs defaultValue="settings" className="mt-2">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="settings">
+                        <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+                        Settings
+                      </TabsTrigger>
+                      <TabsTrigger value="invite">
+                        <UserCheck className="mr-1.5 h-3.5 w-3.5" />
+                        Invite
+                      </TabsTrigger>
+                    </TabsList>
 
-                    {/* COLUMN 1 — Join Mode */}
-                    <div className="space-y-4">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2">
-                        Join Mode
-                      </p>
-                      <Select
-                        value={settingsDraft.joinMode}
-                        onValueChange={(value) =>
-                          setSettingsDraft((current) => ({
-                            ...current,
-                            joinMode: value as MeetingJoinMode,
-                          }))
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="organization_only">Organization only</SelectItem>
-                          <SelectItem value="invite_only">Invite only</SelectItem>
-                          <SelectItem value="anyone_with_link">Anyone with link</SelectItem>
-                          <SelectItem value="ask_to_join">Ask to join</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {/* ── Settings Tab ── */}
+                    <TabsContent value="settings" className="mt-4 space-y-5">
+                      {/* Join Mode */}
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Join Mode
+                        </p>
+                        <Select
+                          value={settingsDraft.joinMode}
+                          onValueChange={(value) =>
+                            setSettingsDraft((current) => ({
+                              ...current,
+                              joinMode: value as MeetingJoinMode,
+                            }))
+                          }
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="organization_only">Organization only</SelectItem>
+                            <SelectItem value="invite_only">Invite only</SelectItem>
+                            <SelectItem value="anyone_with_link">Anyone with link</SelectItem>
+                            <SelectItem value="ask_to_join">Ask to join</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                    {/* COLUMN 2 — Permission Toggles */}
-                    <div className="space-y-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2">
-                        Permissions
-                      </p>
-                      {[
-                        ["allowScreenShare", "Allow screen share"],
-                        ["allowChat", "Allow chat"],
-                        ["allowReactions", "Allow reactions"],
-                        ["allowRecording", "Allow recording"],
-                        ["allowParticipantsToUnmute", "Allow participants to unmute"],
-                        ["autoAdmitOrgUsers", "Auto-admit org users"],
-                        ["lobbyEnabled", "Enable lobby"],
-                      ].map(([field, label]) => (
-                        <div key={field} className="flex items-center justify-between gap-3">
-                          <p className="text-sm text-foreground">{label}</p>
-                          <Switch
-                            checked={settingsDraft[field as keyof MeetingSettings] as boolean}
-                            onCheckedChange={(checked) =>
-                              setSettingsDraft((current) => ({
-                                ...current,
-                                [field]: checked,
-                              }))
-                            }
-                          />
+                      {/* Permission Toggles */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Permissions
+                        </p>
+                        <div className="rounded-lg border border-border divide-y divide-border">
+                          {[
+                            ["allowScreenShare", "Allow screen share"],
+                            ["allowChat", "Allow chat"],
+                            ["allowReactions", "Allow reactions"],
+                            ["allowRecording", "Allow recording"],
+                            ["allowParticipantsToUnmute", "Allow participants to unmute"],
+                            ["autoAdmitOrgUsers", "Auto-admit org users"],
+                            ["lobbyEnabled", "Enable lobby"],
+                          ].map(([field, label]) => (
+                            <div key={field} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                              <p className="text-sm text-foreground">{label}</p>
+                              <Switch
+                                checked={settingsDraft[field as keyof MeetingSettings] as boolean}
+                                onCheckedChange={(checked) =>
+                                  setSettingsDraft((current) => ({
+                                    ...current,
+                                    [field]: checked,
+                                  }))
+                                }
+                              />
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+                      </div>
+
+                      {/* Lock Meeting */}
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
                         <div className="flex items-center gap-2">
                           {lockDraft ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
                           <p className="text-sm text-foreground">Lock meeting</p>
                         </div>
                         <Switch checked={lockDraft} onCheckedChange={setLockDraft} />
                       </div>
-                    </div>
+                    </TabsContent>
 
-                    {/* COLUMN 3 — Invite People */}
-                    <div className="space-y-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2">
-                        Invite People
-                      </p>
+                    {/* ── Invite Tab ── */}
+                    <TabsContent value="invite" className="mt-4 space-y-4">
                       <p className="text-xs text-muted-foreground">
                         Add emails to invite participants to this meeting.
                       </p>
@@ -573,27 +586,27 @@ export function MeetingSidePanel({
                         </Button>
                       </div>
 
-                      <ScrollArea className="h-40 rounded-md border border-border/60 p-2">
+                      <ScrollArea className="h-52 rounded-md border border-border/60 p-2">
                         <div className="space-y-2">
                           {meetingInvites.length === 0 ? (
-                            <p className="px-2 py-1 text-xs text-muted-foreground">
+                            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
                               No invites yet.
                             </p>
                           ) : (
                             meetingInvites.map((invite) => (
                               <div
                                 key={invite._id}
-                                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5"
+                                className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
                               >
                                 <div className="min-w-0">
-                                  <p className="truncate text-xs font-medium text-foreground">
+                                  <p className="truncate text-sm font-medium text-foreground">
                                     {invite.email}
                                   </p>
-                                  <p className="text-[11px] text-muted-foreground">
+                                  <p className="text-xs text-muted-foreground">
                                     {roleLabel(invite.role)} · {inviteStatusLabel(invite.resolvedStatus)}
                                   </p>
                                 </div>
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1.5">
                                   {invite.resolvedStatus !== "accepted" && invite.resolvedStatus !== "cancelled" ? (
                                     <>
                                       <Button
@@ -651,9 +664,8 @@ export function MeetingSidePanel({
                           )}
                         </div>
                       </ScrollArea>
-                    </div>
-
-                  </div>
+                    </TabsContent>
+                  </Tabs>
 
                   <DialogFooter>
                     <Button onClick={() => void handleSaveSettings()} disabled={isSavingSettings}>
