@@ -11,17 +11,18 @@ const MAX_NO_SPEECH_PROB = 0.35;
 const MIN_AVG_LOGPROB = -0.8;
 const MAX_COMPRESSION_RATIO = 2.4;
 const PROMPT_LEAK_SNIPPETS = [
-  "the speaker may use more than one language",
-  "do not translate paraphrase or normalize into a single language",
-  "preserve names technical words and original meaning",
-  "the speaker may switch naturally between hindi english and marathi",
-  "preserve code switching and do not translate",
-  "keep english technical words product names acronyms and people names exactly as spoken",
-  "preserve meaning faithfully and avoid rewriting into pure english",
-  "do not translate to english",
-  "do not translate to hindi or marathi",
+  "output only the spoken words",
+  "do not translate",
   "do not translate or paraphrase",
-  "preserve names and technical terms accurately",
+  "preserve names and technical terms",
+];
+const INSTRUCTION_ARTIFACTS = [
+  "do not translate",
+  "don't translate",
+  "do not translate or paraphrase",
+  "preserve names and technical terms",
+  "keep names and technical terms as spoken",
+  "keep code switching",
 ];
 
 type TranscriptionMode =
@@ -46,37 +47,37 @@ function getTranscriptionConfig(mode: string | null) {
     case "hindi_english_marathi":
       return {
         language: undefined,
-        prompt: "Mixed Hindi, Marathi, and English conversation. Keep code-switching, names, acronyms, and technical terms exactly as spoken. Do not translate.",
+        prompt: "Mixed Hindi, Marathi, and English conversation. Output only the spoken words.",
         scriptMode: "devanagari_latin" as const,
       };
     case "hindi_english":
       return {
         language: "hi" as const,
-        prompt: "Mixed Hindi and English conversation. Keep code-switching, names, acronyms, and technical terms exactly as spoken. Do not translate.",
+        prompt: "Mixed Hindi and English conversation. Output only the spoken words.",
         scriptMode: "devanagari_latin" as const,
       };
     case "hindi":
       return {
         language: "hi" as const,
-        prompt: "Hindi speech. Keep names and technical terms as spoken. Do not translate.",
+        prompt: "Hindi speech. Output only the spoken words.",
         scriptMode: "devanagari_latin" as const,
       };
     case "marathi":
       return {
         language: "mr" as const,
-        prompt: "Marathi speech. Keep names and technical terms as spoken. Do not translate.",
+        prompt: "Marathi speech. Output only the spoken words.",
         scriptMode: "devanagari_latin" as const,
       };
     case "english":
       return {
         language: "en" as const,
-        prompt: "English speech. Keep names and technical terms as spoken. Do not translate.",
+        prompt: "English speech. Output only the spoken words.",
         scriptMode: "latin_only" as const,
       };
     default:
       return {
         language: "hi" as const,
-        prompt: "Indian multilingual speech (Hindi, Marathi, English). Keep code-switching, names, acronyms, and technical terms exactly as spoken. Do not translate.",
+        prompt: "Indian multilingual speech (Hindi, Marathi, English). Output only the spoken words.",
         scriptMode: "devanagari_latin" as const,
       };
   }
@@ -116,6 +117,15 @@ function isPromptLeak(text: string, prompt: string | undefined) {
   }
 
   return PROMPT_LEAK_SNIPPETS.some((snippet) => normalizedText.includes(snippet));
+}
+
+function isInstructionArtifact(text: string) {
+  const normalizedText = normalizeText(text);
+  if (!normalizedText) return false;
+
+  return INSTRUCTION_ARTIFACTS.some((artifact) =>
+    normalizedText === artifact || normalizedText.startsWith(artifact),
+  );
 }
 
 function getFileExtension(file: File) {
@@ -213,6 +223,9 @@ export async function POST(request: Request) {
     }
 
     if (isPromptLeak(text, config.prompt)) {
+      return NextResponse.json({ text: "" });
+    }
+    if (isInstructionArtifact(text)) {
       return NextResponse.json({ text: "" });
     }
 
