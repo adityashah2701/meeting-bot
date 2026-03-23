@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { useQuery, useMutation } from "convex/react";
 import { AlertCircle, Clock3, Mic, MicOff, PanelRightClose, PanelRightOpen, Radio } from "lucide-react";
 import { toast } from "sonner";
@@ -57,11 +58,15 @@ function getDefaultTranscriptionMode(): TranscriptionMode {
 
 export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const router = useRouter();
+  const { user } = useUser();
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
   const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
   const saveSummary = useMutation(meetingService.saveSummary);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
+  const endMeeting = useMutation(meetingService.endMeeting);
+
+  const isHost = user?.id === meeting?.creatorClerkId;
 
   const [interimTranscript, setInterimTranscript] = useState<TranscriptLine | null>(null);
   const [queuedTranscriptLines, setQueuedTranscriptLines] = useState<TranscriptLine[]>([]);
@@ -187,6 +192,13 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   // With the MediaRecorder pipeline, isTranscribing already accounts for enabled state
   const isActivelyTranscribing = isTranscribing;
 
+  useEffect(() => {
+    if (meeting?.status === "ended") {
+      toast.info("This meeting has been ended by the host.");
+      router.push("/meetings");
+    }
+  }, [meeting?.status, router]);
+
   if (meeting === undefined) return <LoadingBlock className="h-screen w-full" />;
   if (!meeting) return <div className="p-6 text-sm text-muted-foreground">Meeting not found.</div>;
 
@@ -205,6 +217,25 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
           : "You left the meeting",
       );
     } catch { toast.error("Unable to leave meeting cleanly"); }
+    finally { router.push("/meetings"); }
+  };
+
+  const handleEndMeeting = async () => {
+    try {
+      let summaryGenerated = false;
+      if (meeting.status !== "ended") {
+        const toastId = toast.loading("Generating final summary…", { duration: 10000 });
+        const artifacts = await buildMeetingArtifacts().catch(() => null);
+        await endMeeting({ meetingId });
+        toast.dismiss(toastId);
+        summaryGenerated = Boolean(artifacts);
+      }
+      toast.success(
+        summaryGenerated
+          ? "Meeting ended for all and summary was saved"
+          : "Meeting ended for all",
+      );
+    } catch { toast.error("Unable to end meeting cleanly"); }
     finally { router.push("/meetings"); }
   };
 
@@ -325,10 +356,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
             isAudioMuted={isAudioMuted}
             isVideoOff={isVideoOff}
             isScreenSharing={isScreenSharing}
+            isHost={isHost}
             onToggleAudio={() => void toggleAudio()}
             onToggleVideo={() => void toggleVideo()}
             onToggleScreenShare={() => void (isScreenSharing ? stopScreenShare() : startScreenShare())}
             onLeave={() => void handleLeave()}
+            onEndMeeting={() => void handleEndMeeting()}
           />
         </div>
       </div>
