@@ -7,47 +7,99 @@ const TRANSCRIPTION_MODEL = "whisper-large-v3";
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const TRANSCRIBE_RATE_LIMIT = 90;
 const TRANSCRIBE_RATE_WINDOW_MS = 60_000;
+const MAX_NO_SPEECH_PROB = 0.35;
+const MIN_AVG_LOGPROB = -0.8;
+const MAX_COMPRESSION_RATIO = 2.4;
 const PROMPT_LEAK_SNIPPETS = [
   "the speaker may use more than one language",
   "do not translate paraphrase or normalize into a single language",
   "preserve names technical words and original meaning",
-  "the speaker may switch naturally between hindi and english",
-  "preserve hinglish code switching and do not translate",
+  "the speaker may switch naturally between hindi english and marathi",
+  "preserve code switching and do not translate",
   "keep english technical words product names acronyms and people names exactly as spoken",
   "preserve meaning faithfully and avoid rewriting into pure english",
   "do not translate to english",
+  "do not translate to hindi or marathi",
   "do not translate or paraphrase",
   "preserve names and technical terms accurately",
 ];
 
-type TranscriptionMode = "auto" | "hinglish" | "hindi" | "english";
+type TranscriptionMode =
+  | "auto"
+  | "hindi_english_marathi"
+  | "hindi_english"
+  | "hindi"
+  | "marathi"
+  | "english";
 
 function getTranscriptionConfig(mode: string | null) {
   const normalizedMode: TranscriptionMode =
-    mode === "hinglish" || mode === "hindi" || mode === "english" ? mode : "auto";
+    mode === "hindi_english_marathi"
+    || mode === "hindi_english"
+    || mode === "hindi"
+    || mode === "marathi"
+    || mode === "english"
+      ? mode
+      : "auto";
 
   switch (normalizedMode) {
-    case "hinglish":
+    case "hindi_english_marathi":
+      return {
+        language: undefined,
+        prompt: "Mixed Hindi, Marathi, and English conversation. Keep code-switching, names, acronyms, and technical terms exactly as spoken. Do not translate.",
+        scriptMode: "devanagari_latin" as const,
+      };
+    case "hindi_english":
       return {
         language: "hi" as const,
-        prompt: "Hinglish conversation with mixed Hindi and English. Keep names, acronyms, and technical product words as spoken.",
+        prompt: "Mixed Hindi and English conversation. Keep code-switching, names, acronyms, and technical terms exactly as spoken. Do not translate.",
+        scriptMode: "devanagari_latin" as const,
       };
     case "hindi":
       return {
         language: "hi" as const,
-        prompt: "Hindi speech. Keep names and technical terms as spoken.",
+        prompt: "Hindi speech. Keep names and technical terms as spoken. Do not translate.",
+        scriptMode: "devanagari_latin" as const,
+      };
+    case "marathi":
+      return {
+        language: "mr" as const,
+        prompt: "Marathi speech. Keep names and technical terms as spoken. Do not translate.",
+        scriptMode: "devanagari_latin" as const,
       };
     case "english":
       return {
         language: "en" as const,
-        prompt: "English speech. Keep names and technical terms as spoken.",
+        prompt: "English speech. Keep names and technical terms as spoken. Do not translate.",
+        scriptMode: "latin_only" as const,
       };
     default:
       return {
-        language: undefined,
-        prompt: "Multilingual speech. Keep names, acronyms, and technical words as spoken.",
+        language: "hi" as const,
+        prompt: "Indian multilingual speech (Hindi, Marathi, English). Keep code-switching, names, acronyms, and technical terms exactly as spoken. Do not translate.",
+        scriptMode: "devanagari_latin" as const,
       };
   }
+}
+
+function hasUnsupportedScript(text: string, scriptMode: "devanagari_latin" | "latin_only") {
+  if (!text.trim()) return false;
+
+  // Latin letters and common punctuation/numbers
+  const latin = /[A-Za-z]/;
+  const devanagari = /[\u0900-\u097F]/;
+
+  for (const ch of text) {
+    if (/[\d\s.,!?'"`~@#$%^&*()_\-+=:;<>/\\|[\]{}]/.test(ch)) continue;
+    if (scriptMode === "latin_only") {
+      if (latin.test(ch)) continue;
+      return true;
+    }
+    if (latin.test(ch) || devanagari.test(ch)) continue;
+    return true;
+  }
+
+  return false;
 }
 
 function normalizeText(value: string) {
@@ -130,55 +182,38 @@ export async function POST(request: Request) {
       response_format: "verbose_json",
       language: config.language,
       prompt: config.prompt,
-    }) as unknown as { text: string; segments?: { text: string; no_speech_prob?: number; avg_logprob?: number }[] };
+      temperature: 0,
+    }) as unknown as {
+      text: string;
+      segments?: {
+        text: string;
+        no_speech_prob?: number;
+        avg_logprob?: number;
+        compression_ratio?: number;
+      }[];
+    };
 
     let text = "";
     if (response.segments && Array.isArray(response.segments)) {
       const validSegments = response.segments.filter((seg) => {
-        // Drop noisy/hallucinated segments (1.4 Add Confidence Filtering)
-        if (seg.no_speech_prob && seg.no_speech_prob > 0.5) return false;
-        if (seg.avg_logprob && seg.avg_logprob < -1.0) return false;
+        // Drop noisy/hallucinated segments more aggressively.
+        if (typeof seg.no_speech_prob === "number" && seg.no_speech_prob > MAX_NO_SPEECH_PROB) return false;
+        if (typeof seg.avg_logprob === "number" && seg.avg_logprob < MIN_AVG_LOGPROB) return false;
+        if (typeof seg.compression_ratio === "number" && seg.compression_ratio > MAX_COMPRESSION_RATIO) return false;
+        if (!seg.text || seg.text.trim().length < 2) return false;
+        if (hasUnsupportedScript(seg.text, config.scriptMode)) return false;
         return true;
       });
       text = validSegments.map((seg) => seg.text).join(" ").replace(/\s+/g, " ").trim();
     } else {
       text = (response.text ?? "").trim();
+      if (hasUnsupportedScript(text, config.scriptMode)) {
+        text = "";
+      }
     }
 
     if (isPromptLeak(text, config.prompt)) {
       return NextResponse.json({ text: "" });
-    }
-
-    if (text) {
-      // 1.2 Add AI Cleanup Layer (MANDATORY)
-      try {
-        const cleanupResponse = await groq.chat.completions.create({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            {
-              role: "system",
-              content: "You are an AI assistant that cleans up and corrects transcriptions. Fix the following transcription which may contain mixed Hindi and English (Hinglish). Do not change meaning. Do not hallucinate. Return clean and accurate text. Only return the final corrected string, with no quotes, commentary, or extra formatting.",
-            },
-            {
-              role: "user",
-              content: text,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 1024,
-        });
-
-        const cleanedText = cleanupResponse.choices[0]?.message?.content?.trim();
-        if (cleanedText) {
-          if (!isPromptLeak(cleanedText, config.prompt)) {
-             text = cleanedText;
-          } else {
-             text = "";
-          }
-        }
-      } catch (cleanupError) {
-        console.error("[transcribe] Cleanup error:", cleanupError);
-      }
     }
 
     return NextResponse.json({ text });

@@ -33,10 +33,14 @@ function getDefaultTranscriptionMode(): TranscriptionMode {
   }
 
   const storedMode = window.localStorage.getItem(TRANSCRIPTION_MODE_STORAGE_KEY);
+  if (storedMode === "auto") {
+    return "hindi_english_marathi";
+  }
   if (
-    storedMode === "auto" ||
-    storedMode === "hinglish" ||
+    storedMode === "hindi_english_marathi" ||
+    storedMode === "hindi_english" ||
     storedMode === "hindi" ||
+    storedMode === "marathi" ||
     storedMode === "english"
   ) {
     return storedMode;
@@ -47,10 +51,11 @@ function getDefaultTranscriptionMode(): TranscriptionMode {
 
   if (
     browserLanguages.includes("hi") ||
+    browserLanguages.includes("mr") ||
     browserLanguages.includes("en-in") ||
     timeZone.includes("kolkata")
   ) {
-    return "hinglish";
+    return "hindi_english_marathi";
   }
 
   return "auto";

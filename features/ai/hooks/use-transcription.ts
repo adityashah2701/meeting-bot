@@ -11,7 +11,13 @@ export type TranscriptLine = {
   timestamp: number;
 };
 
-export type TranscriptionMode = "auto" | "hinglish" | "hindi" | "english";
+export type TranscriptionMode =
+  | "auto"
+  | "hindi_english_marathi"
+  | "hindi_english"
+  | "hindi"
+  | "marathi"
+  | "english";
 
 const PROCESSOR_BUFFER_SIZE = 4096;
 const VOICE_RMS_THRESHOLD = 0.02;

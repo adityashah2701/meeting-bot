@@ -53,6 +53,8 @@ export function MeetingSidePanel({
   const [message, setMessage] = useState("");
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [structuredResult, setStructuredResult] = useState<MeetingSummaryResult | null>(null);
+  const normalizedTranscriptionMode =
+    transcriptionMode === "auto" ? "hindi_english_marathi" : transcriptionMode;
 
   const transcriptPayload = useMemo(
     () =>
@@ -289,11 +291,11 @@ export function MeetingSidePanel({
                 Transcription Mode
               </p>
               <p className="text-xs text-muted-foreground">
-                Use `Hindi + English` for Hinglish speech.
+                Recommended: `Hindi + English + Marathi` for best mixed-language accuracy.
               </p>
             </div>
             <Select
-              value={transcriptionMode}
+              value={normalizedTranscriptionMode}
               onValueChange={(value) =>
                 onTranscriptionModeChange(value as TranscriptionMode)
               }
@@ -302,9 +304,10 @@ export function MeetingSidePanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">Auto</SelectItem>
-                <SelectItem value="hinglish">Hindi + English</SelectItem>
+                <SelectItem value="hindi_english_marathi">Hindi + English + Marathi</SelectItem>
+                <SelectItem value="hindi_english">Hindi + English</SelectItem>
                 <SelectItem value="hindi">Hindi</SelectItem>
+                <SelectItem value="marathi">Marathi</SelectItem>
                 <SelectItem value="english">English</SelectItem>
               </SelectContent>
             </Select>
