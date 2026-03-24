@@ -189,44 +189,6 @@ export function IntegrationsPage() {
                   </div>
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  Granted scopes
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(googleCalendarConnection.scope ?? []).length > 0 ? (
-                    googleCalendarConnection.scope?.map((scope: string) => (
-                      <Badge key={scope} variant="outline" className="max-w-full truncate">
-                        {scope}
-                      </Badge>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Scopes will appear after a successful connection.
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  Debug checks
-                </p>
-                <div className="grid gap-2 text-sm text-muted-foreground">
-                  <p>
-                    Refresh token stored: {googleCalendarConnection.hasRefreshToken ? "yes" : "no"}
-                  </p>
-                  <p>
-                    Convex Google client env: {googleCalendarConnection.hasGoogleClientId && googleCalendarConnection.hasGoogleClientSecret ? "configured" : "missing"}
-                  </p>
-                  <p>
-                    Public app URL: {googleCalendarConnection.publicAppUrlConfigured ? googleCalendarConnection.publicAppUrl : "missing"}
-                  </p>
-                  <p>
-                    Extra calendar env present: {googleCalendarConnection.hasConfiguredCalendarId ? "yes" : "no"}
-                  </p>
-                </div>
-              </div>
             </div>
           </CardContent>
           <CardFooter className="flex flex-wrap items-center justify-between gap-3">
@@ -264,45 +226,7 @@ export function IntegrationsPage() {
           </CardFooter>
         </Card>
 
-        <Card className="border border-border/80 bg-card/60">
-          <CardHeader className="border-b border-border/70">
-            <CardTitle>Implementation status</CardTitle>
-            <CardDescription>
-              The first usable Google Calendar slice is now wired into scheduling.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-5">
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Live now
-              </p>
-              <div className="grid gap-2 text-sm text-foreground">
-                <p>OAuth connect and disconnect flow</p>
-                <p>Per-user Google connection state</p>
-                <p>Scheduled-meeting sync toggle</p>
-                <p>Background event creation after meeting scheduling</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Next recommended steps
-              </p>
-              <div className="grid gap-2 text-sm text-muted-foreground">
-                <p>Event update and cancellation sync</p>
-                <p>Attendee import from existing calendar events</p>
-                <p>Open in Google Calendar from meeting details</p>
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank">
-                Open Google Cloud setup
-                <ExternalLink className="h-4 w-4" />
-              </Link>
-            </Button>
-          </CardFooter>
-        </Card>
+        
       </div>
     </div>
   );

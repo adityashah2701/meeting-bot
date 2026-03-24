@@ -94,7 +94,7 @@ export function DashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>Recent meetings</CardTitle>
-              <p className="text-sm text-muted-foreground">Latest activity synced from Convex.</p>
+              <p className="text-sm text-muted-foreground">Latest activity.</p>
             </div>
             <Button variant="outline" asChild>
               <Link href="/meetings">View all</Link>

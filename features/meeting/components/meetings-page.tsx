@@ -26,7 +26,7 @@ export function MeetingsPage() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Meetings</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Every meeting in this workspace is now sourced from Convex in realtime.
+            Every meeting in this workspace is in realtime.
           </p>
         </div>
       </div>

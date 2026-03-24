@@ -32,8 +32,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <AppSidebar />
             </div>
             <div>
-              <p className="text-sm font-medium text-foreground">Workspace</p>
-              <p className="text-xs text-muted-foreground">Production-grade meeting operations</p>
+              <p className="text-md font-medium text-foreground">Workspace</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
