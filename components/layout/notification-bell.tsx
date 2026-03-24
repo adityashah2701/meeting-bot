@@ -4,148 +4,153 @@ import React, { useEffect, useRef } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@/convex/_generated/api';
 import { useOrganization, useUser } from '@clerk/nextjs';
-import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { Bell } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import Link from 'next/link';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
-function resolveNotificationLink(link?: string) {
-  if (!link) {
-    return null;
+function getInitials(message: string): string {
+  // Try to extract a name from the message like "Tanmay Mirgal started fg"
+  const match = message.match(/^([A-Za-z]+)\s+([A-Za-z]+)/);
+  if (match) {
+    return `${match[1][0]}${match[2][0]}`.toUpperCase();
   }
+  return message.charAt(0).toUpperCase();
+}
 
-  if (link === "/invitations" || link.startsWith("/invitations?")) {
-    return "/dashboard#invitation-inbox";
-  }
-
-  return link;
+function timeAgo(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 export function NotificationBell() {
   const { organization } = useOrganization();
   const { user } = useUser();
-  const router = useRouter();
   const markRead = useMutation(api.notifications.index.markRead);
+  const markAllRead = useMutation(api.notifications.index.markAllRead);
   const hasHydratedRef = useRef(false);
   const seenNotificationIdsRef = useRef(new Set<string>());
 
   const notifications = useQuery(
     api.notifications.index.list,
-    organization?.id ? { orgId: organization.id } : "skip"
+    organization?.id ? { orgId: organization.id } : 'skip',
   );
 
+  // Mark existing as seen on first load (no toast spam)
   useEffect(() => {
-    if (!organization || !user || !notifications) {
-      return;
-    }
-
-    if (!hasHydratedRef.current) {
-      notifications.forEach((notification) => {
-        seenNotificationIdsRef.current.add(notification._id);
-      });
-      hasHydratedRef.current = true;
-      return;
-    }
-
-    notifications.forEach((notification) => {
-      if (seenNotificationIdsRef.current.has(notification._id)) {
-        return;
-      }
-
-      seenNotificationIdsRef.current.add(notification._id);
-      if (!notification.isRead && notification.kind === "meeting_invitation") {
-        const notificationLink = resolveNotificationLink(notification.link);
-        toast.message(notification.message, {
-          action: notificationLink
-            ? {
-                label: "Open inbox",
-                onClick: () => router.push(notificationLink),
-              }
-            : undefined,
-        });
-      }
-    });
-  }, [notifications, organization, router, user]);
+    if (!notifications || hasHydratedRef.current) return;
+    notifications.forEach((n) => seenNotificationIdsRef.current.add(n._id));
+    hasHydratedRef.current = true;
+  }, [notifications]);
 
   if (!organization || !user) return null;
 
-  const unreadCount = notifications?.filter((n) => !n.isRead).length || 0;
+  const unreadCount = notifications?.filter((n) => !n.isRead).length ?? 0;
+
+  const handleOpenChange = (open: boolean) => {
+    if (open && organization && (unreadCount > 0)) {
+      void markAllRead({ orgId: organization.id });
+    }
+  };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        <Button variant="ghost" size="icon" className="relative h-9 w-9">
+          <Bell className="h-4.5 w-4.5" />
           {unreadCount > 0 && (
-            <Badge variant="destructive" className="absolute -top-1 -right-1 px-1.5 py-0.5 min-w-5 h-5 flex items-center justify-center text-[10px]">
-              {unreadCount}
-            </Badge>
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 max-h-[400px] overflow-y-auto">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-          <span className="font-semibold text-sm">Notifications</span>
-        </div>
-        {notifications === undefined ? (
-          <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
-        ) : notifications.length === 0 ? (
-          <div className="p-4 text-center text-sm text-muted-foreground">No new notifications</div>
-        ) : (
-          <div className="py-2">
-            {notifications.map((notification) => {
-              const notificationLink = resolveNotificationLink(notification.link);
-              const ctaLabel = notification.kind === "meeting_invitation"
-                ? "Open inbox"
-                : "View meeting";
 
-              return (
-                <DropdownMenuItem key={notification._id} className="cursor-pointer" asChild>
+      <DropdownMenuContent
+        align="end"
+        className="w-[340px] overflow-hidden rounded-xl border border-border p-0 shadow-xl"
+        sideOffset={8}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <span className="text-sm font-semibold text-foreground">Notifications</span>
+          {unreadCount > 0 && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              {unreadCount} unread
+            </span>
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="max-h-[360px] overflow-y-auto">
+          {notifications === undefined ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+              Loading…
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+              <Bell className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm font-medium text-foreground">All caught up</p>
+              <p className="text-xs text-muted-foreground">No new notifications</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {notifications.map((notification) => {
+                const initials = getInitials(notification.message);
+                return (
                   <div
-                    className={`flex flex-col gap-1 px-4 py-3 ${!notification.isRead ? 'bg-primary/5' : ''}`}
+                    key={notification._id}
+                    className={`flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/40 ${
+                      !notification.isRead ? 'bg-primary/5' : ''
+                    }`}
                     onClick={() => {
                       if (!notification.isRead) {
-                        markRead({ notificationId: notification._id });
-                      }
-                      if (notificationLink) {
-                        router.push(notificationLink);
+                        void markRead({ notificationId: notification._id });
                       }
                     }}
                   >
-                    {notification.title ? (
-                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        {notification.title}
-                      </span>
-                    ) : null}
-                    <span className={`text-sm ${!notification.isRead ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
-                      {notification.message}
-                    </span>
-                    {notificationLink ? (
-                      <Link
-                        href={notificationLink}
-                        className="mt-1 text-xs text-primary hover:underline"
-                        onClick={(event) => event.stopPropagation()}
+                    {/* Avatar */}
+                    <Avatar className="mt-0.5 h-8 w-8 shrink-0 border border-border/50">
+                      <AvatarFallback className="bg-primary/10 text-[11px] font-bold text-primary">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    {/* Content */}
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={`text-[13px] leading-snug ${
+                          !notification.isRead
+                            ? 'font-medium text-foreground'
+                            : 'text-muted-foreground'
+                        }`}
                       >
-                        {ctaLabel}
-                      </Link>
-                    ) : null}
-                    <span className="mt-1 text-[10px] text-muted-foreground">
-                      {new Date(notification.createdAt).toLocaleTimeString()}
-                    </span>
+                        {notification.message}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                        {timeAgo(notification.createdAt)}
+                      </p>
+                    </div>
+
+                    {/* Unread dot */}
+                    {!notification.isRead && (
+                      <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
+                    )}
                   </div>
-                </DropdownMenuItem>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );
