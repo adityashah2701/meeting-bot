@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
-import { AlertCircle, CircleDot, Clock3, Focus, Lock, Mic, MicOff, MoreHorizontal, PanelRightClose, PanelRightOpen, Pin, Radio, Settings2, ShieldAlert, StopCircle, Subtitles } from "lucide-react";
+import { AlertCircle, CircleDot, Clock3, Focus, Lock, Mic, MicOff, MoreHorizontal, PanelRightClose, PanelRightOpen, PenSquare, Pin, Radio, Settings2, ShieldAlert, StopCircle, Subtitles } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import { useWebrtc } from "@/features/webrtc/hooks/use-webrtc";
 import { ParticipantGrid } from "@/features/webrtc/components/participant-grid";
 import { MeetingControls } from "@/features/webrtc/components/meeting-controls";
 import { MeetingSidePanel } from "@/features/meeting/components/meeting-side-panel";
+import { MeetingWhiteboard } from "@/features/meeting/components/meeting-whiteboard";
 
 const AUTO_SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const TRANSCRIPTION_MODE_STORAGE_KEY = "meeting-bot-transcription-mode";
@@ -109,8 +110,11 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
   const recordings = useQuery(meetingService.listRecordings, { meetingId }) ?? [];
+  const whiteboard = useQuery(meetingService.getWhiteboard, { meetingId });
   const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
   const saveSummary = useMutation(meetingService.saveSummary);
+  const setWhiteboardOpen = useMutation(meetingService.setWhiteboardOpen);
+  const saveWhiteboardScene = useMutation(meetingService.saveWhiteboardScene);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
   const endMeeting = useMutation(meetingService.endMeeting);
   const startRecording = useMutation(meetingService.startRecording);
@@ -282,7 +286,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     }
   }, [meeting?.status, router]);
 
-  if (meeting === undefined) return <LoadingBlock className="h-screen w-full" />;
+  if (meeting === undefined || whiteboard === undefined) return <LoadingBlock className="h-screen w-full" />;
   if (!meeting) return <div className="p-6 text-sm text-muted-foreground">Meeting not found.</div>;
 
   const currentParticipantStatus = meeting.currentParticipant?.status ?? participantStatus;
@@ -294,7 +298,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const canToggleAudio = isJoined && (!isAudioMuted || Boolean(meeting.effectivePermissions?.canUnmuteSelf));
   const canToggleVideo = isJoined && meeting.currentParticipant?.role !== "viewer";
   const canShareScreen = isJoined && Boolean(meeting.effectivePermissions?.canShareScreen);
+  const canUseWhiteboard = isJoined && Boolean(meeting.effectivePermissions?.canUseWhiteboard);
   const showMeetingLockBanner = isJoined && meeting.isLocked;
+  const isWhiteboardOpen = Boolean(whiteboard?.isOpen);
+  const hasActivePresentation =
+    isScreenSharing || participants.some((participant) => participant.isScreenSharing);
+  const whiteboardOwnerLabel = whiteboard?.updatedByName?.trim() || "Someone";
   const transcriptDockClass =
     transcriptDock === "top-left"
       ? "left-4 top-4"
@@ -864,6 +873,51 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                     </span>
                   </button>
 
+                  <button
+                    onClick={() => {
+                      if (!canUseWhiteboard) {
+                        return;
+                      }
+                      void setWhiteboardOpen({
+                        meetingId,
+                        isOpen: !isWhiteboardOpen,
+                      }).catch((error) => {
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Unable to update whiteboard",
+                        );
+                      });
+                    }}
+                    disabled={!canUseWhiteboard || (hasActivePresentation && !isWhiteboardOpen)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      isWhiteboardOpen
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-background text-foreground hover:bg-muted"
+                    } ${
+                      !canUseWhiteboard || (hasActivePresentation && !isWhiteboardOpen)
+                        ? "cursor-not-allowed opacity-50"
+                        : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <PenSquare className="h-4 w-4" />
+                      <span>Shared whiteboard</span>
+                    </div>
+                    <span className={`text-xs font-medium ${ isWhiteboardOpen ? "text-primary" : "text-muted-foreground" }`}>
+                      {isWhiteboardOpen ? `Live by ${whiteboardOwnerLabel}` : "Off"}
+                    </span>
+                  </button>
+                  {hasActivePresentation && !isWhiteboardOpen ? (
+                    <p className="px-1 text-xs text-muted-foreground">
+                      Stop screen sharing before opening the whiteboard.
+                    </p>
+                  ) : !canUseWhiteboard ? (
+                    <p className="px-1 text-xs text-muted-foreground">
+                      Only the host can enable member whiteboard access in meeting settings.
+                    </p>
+                  ) : null}
+
                   {/* Transcript dock position — only visible when floating transcript is on */}
                   {showFloatingTranscript ? (
                     <div className="mt-1 rounded-lg border border-border bg-background px-3 py-2.5">
@@ -994,6 +1048,56 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                 pinnedParticipantId={pinnedParticipantId}
                 focusMode={focusMode}
                 compactRail={compactRail}
+                stage={
+                  isWhiteboardOpen && !hasActivePresentation ? (
+                    <div className="flex h-full min-h-0 flex-col bg-white">
+                      <div className="flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm">
+                            <PenSquare className="h-3.5 w-3.5 text-primary" />
+                            Shared whiteboard
+                          </div>
+                          <div className="inline-flex items-center rounded-full bg-primary/8 px-3 py-1 text-xs text-muted-foreground">
+                            Live for everyone · opened by {whiteboardOwnerLabel}
+                          </div>
+                        </div>
+                        {canUseWhiteboard ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 rounded-full text-xs"
+                            onClick={() => {
+                              void setWhiteboardOpen({ meetingId, isOpen: false }).catch((error) => {
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "Unable to close whiteboard",
+                                );
+                              });
+                            }}
+                          >
+                            <PenSquare className="h-3.5 w-3.5" />
+                            Close
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="min-h-0 flex-1">
+                        <MeetingWhiteboard
+                          meetingId={meetingId}
+                          canEdit={canUseWhiteboard}
+                          serializedScene={whiteboard?.scene ?? null}
+                          onSaveScene={async (scene) => {
+                            try {
+                              await saveWhiteboardScene({ meetingId, scene });
+                            } catch (error) {
+                              console.error("Unable to sync whiteboard", error);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ) : undefined
+                }
               />
             </div>
           )}

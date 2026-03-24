@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { cn } from "@/lib/utils";
 import { VideoTile } from "@/features/webrtc/components/video-tile";
@@ -37,6 +38,7 @@ export function ParticipantGrid({
   pinnedParticipantId,
   focusMode = false,
   compactRail = false,
+  stage,
 }: {
   /** Audio-only stream from the local mic — used exclusively for the speaking indicator. */
   localStream: MediaStream | null;
@@ -50,6 +52,7 @@ export function ParticipantGrid({
   pinnedParticipantId?: string | null;
   focusMode?: boolean;
   compactRail?: boolean;
+  stage?: ReactNode;
 }) {
   const localParticipant = participants.find((p) => p._id === localParticipantId) ?? null;
   const screenSharer = participants.find((p) => p.isScreenSharing) ?? null;
@@ -140,6 +143,49 @@ export function ParticipantGrid({
     ...(localParticipant ? [localParticipant] : []),
     ...participants.filter((p) => p._id !== localParticipantId),
   ];
+
+  if (stage) {
+    return (
+      <div className="flex h-full min-h-0 gap-3">
+        <div className="min-h-0 flex-1">
+          <AspectRatio ratio={16 / 9} className="h-full max-h-full">
+            <div className="h-full overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+              {stage}
+            </div>
+          </AspectRatio>
+        </div>
+
+        <div
+          className={cn(
+            "shrink-0 overflow-y-auto",
+            compactRail ? "w-32" : "w-48",
+            "flex flex-col gap-3",
+          )}
+        >
+          {allParticipants.map((p) => {
+            const isLocal = p._id === localParticipantId;
+            return (
+              <div key={p._id} className="w-full">
+                <AspectRatio ratio={16 / 9}>
+                  <VideoTile
+                    className="h-full rounded-lg"
+                    stream={isLocal ? cameraStream : (remoteCameraStreams[p._id] ?? null)}
+                    audioStream={isLocal ? localStream : undefined}
+                    name={p.name}
+                    imageUrl={p.imageUrl}
+                    isLocal={isLocal}
+                    isMicEnabled={p.isMicEnabled}
+                    isCameraEnabled={p.isCameraEnabled}
+                    isScreenSharing={p.isScreenSharing}
+                  />
+                </AspectRatio>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   if (focusMode && pinnedParticipant) {
     const rail = allParticipants.filter((p) => p._id !== pinnedParticipant._id);

@@ -14,6 +14,7 @@ export const meetingPermissionValues = [
   "canRemoveParticipants",
   "canMuteOthers",
   "canShareScreen",
+  "canUseWhiteboard",
   "canSendChat",
   "canStartRecording",
   "canChangeSettings",
@@ -44,6 +45,7 @@ export type MeetingParticipantStatus = (typeof meetingParticipantStatusValues)[n
 export type MeetingSettings = {
   joinMode: MeetingJoinMode;
   allowScreenShare: boolean;
+  allowWhiteboard?: boolean;
   allowChat: boolean;
   allowReactions: boolean;
   allowRecording: boolean;
@@ -81,6 +83,7 @@ export const permissionsOverrideValidator = v.optional(
     canRemoveParticipants: v.optional(v.boolean()),
     canMuteOthers: v.optional(v.boolean()),
     canShareScreen: v.optional(v.boolean()),
+    canUseWhiteboard: v.optional(v.boolean()),
     canSendChat: v.optional(v.boolean()),
     canStartRecording: v.optional(v.boolean()),
     canChangeSettings: v.optional(v.boolean()),
@@ -93,6 +96,7 @@ export const permissionsOverrideValidator = v.optional(
 export const meetingSettingsValidator = v.object({
   joinMode: meetingJoinModeValidator,
   allowScreenShare: v.boolean(),
+  allowWhiteboard: v.optional(v.boolean()),
   allowChat: v.boolean(),
   allowReactions: v.boolean(),
   allowRecording: v.boolean(),
@@ -106,6 +110,7 @@ export type MeetingPermissionMap = Record<MeetingPermission, boolean>;
 export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   joinMode: "organization_only",
   allowScreenShare: true,
+  allowWhiteboard: true,
   allowChat: true,
   allowReactions: true,
   allowRecording: true,
@@ -136,6 +141,7 @@ export const ROLE_PERMISSION_MAP: Record<MeetingRole, MeetingPermissionMap> = {
     canRemoveParticipants: true,
     canMuteOthers: true,
     canShareScreen: true,
+    canUseWhiteboard: true,
     canSendChat: true,
     canStartRecording: true,
     canChangeSettings: true,
@@ -149,6 +155,7 @@ export const ROLE_PERMISSION_MAP: Record<MeetingRole, MeetingPermissionMap> = {
     canRemoveParticipants: true,
     canMuteOthers: true,
     canShareScreen: true,
+    canUseWhiteboard: true,
     canSendChat: true,
     canStartRecording: true,
     canChangeSettings: true,
@@ -162,6 +169,7 @@ export const ROLE_PERMISSION_MAP: Record<MeetingRole, MeetingPermissionMap> = {
     canRemoveParticipants: false,
     canMuteOthers: false,
     canShareScreen: true,
+    canUseWhiteboard: true,
     canSendChat: true,
     canStartRecording: false,
     canChangeSettings: false,
@@ -175,6 +183,7 @@ export const ROLE_PERMISSION_MAP: Record<MeetingRole, MeetingPermissionMap> = {
     canRemoveParticipants: false,
     canMuteOthers: false,
     canShareScreen: false,
+    canUseWhiteboard: false,
     canSendChat: false,
     canStartRecording: false,
     canChangeSettings: false,
@@ -200,23 +209,28 @@ export function resolveParticipantPermissions(
     return createPermissionMap(false);
   }
 
+  const resolvedSettings = getDefaultMeetingSettings(meeting.settings);
   const resolved = {
     ...ROLE_PERMISSION_MAP[participant.role],
   };
 
-  if (!meeting.settings.allowScreenShare && !isPrivilegedMeetingRole(participant.role)) {
+  if (!resolvedSettings.allowScreenShare && !isPrivilegedMeetingRole(participant.role)) {
     resolved.canShareScreen = false;
   }
 
-  if (!meeting.settings.allowChat && !isPrivilegedMeetingRole(participant.role)) {
+  if (!resolvedSettings.allowWhiteboard && !isPrivilegedMeetingRole(participant.role)) {
+    resolved.canUseWhiteboard = false;
+  }
+
+  if (!resolvedSettings.allowChat && !isPrivilegedMeetingRole(participant.role)) {
     resolved.canSendChat = false;
   }
 
-  if (!meeting.settings.allowRecording && !isPrivilegedMeetingRole(participant.role)) {
+  if (!resolvedSettings.allowRecording && !isPrivilegedMeetingRole(participant.role)) {
     resolved.canStartRecording = false;
   }
 
-  if (!meeting.settings.allowParticipantsToUnmute && !isPrivilegedMeetingRole(participant.role)) {
+  if (!resolvedSettings.allowParticipantsToUnmute && !isPrivilegedMeetingRole(participant.role)) {
     resolved.canUnmuteSelf = false;
   }
 

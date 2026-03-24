@@ -219,6 +219,26 @@ async function archiveInviteNotifications(
   });
 }
 
+async function requireWhiteboardEditorAccess(
+  ctx: MutationCtx,
+  meetingId: Id<"meetings">,
+  userTokenIdentifier: string,
+) {
+  const meeting = await assertMeetingAccess(ctx, userTokenIdentifier, meetingId);
+  const participant = await getMeetingParticipant(ctx, meetingId, userTokenIdentifier);
+
+  if (!participant || participant.status !== "joined") {
+    throw new Error("Join the meeting before using the whiteboard");
+  }
+
+  const permissions = resolveParticipantPermissions(meeting, participant);
+  if (!permissions.canUseWhiteboard) {
+    throw new Error("You do not have permission to present the whiteboard");
+  }
+
+  return { meeting, participant };
+}
+
 export const create = mutation({
   args: {
     orgId: v.string(),
@@ -430,6 +450,7 @@ export const get = query({
 
     return {
       ...meeting,
+      settings: getDefaultMeetingSettings(meeting.settings),
       durationMs: getMeetingDuration(meeting),
       activeParticipants: participants.length,
       waitingParticipants: waitingRoom.length,
@@ -830,6 +851,99 @@ export const getSummary = query({
         q.eq("meetingId", args.meetingId).eq("type", "summary"),
       )
       .unique();
+  },
+});
+
+export const getWhiteboard = query({
+  args: { meetingId: v.id("meetings") },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+
+    return await ctx.db
+      .query("meeting_whiteboards")
+      .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))
+      .unique();
+  },
+});
+
+export const setWhiteboardOpen = mutation({
+  args: {
+    meetingId: v.id("meetings"),
+    isOpen: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const { participant } = await requireWhiteboardEditorAccess(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+
+    const existing = await ctx.db
+      .query("meeting_whiteboards")
+      .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))
+      .unique();
+
+    const payload = {
+      isOpen: args.isOpen,
+      updatedByTokenIdentifier: identity.tokenIdentifier,
+      updatedByName: participant.name,
+      updatedAt: Date.now(),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+      return existing._id;
+    }
+
+    return await ctx.db.insert("meeting_whiteboards", {
+      meetingId: args.meetingId,
+      scene: undefined,
+      ...payload,
+    });
+  },
+});
+
+export const saveWhiteboardScene = mutation({
+  args: {
+    meetingId: v.id("meetings"),
+    scene: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const { participant } = await requireWhiteboardEditorAccess(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+
+    if (args.scene.length > 900_000) {
+      throw new Error("Whiteboard is too large to save. Please clear some items and try again.");
+    }
+
+    const existing = await ctx.db
+      .query("meeting_whiteboards")
+      .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))
+      .unique();
+
+    const payload = {
+      scene: args.scene,
+      isOpen: true,
+      updatedByTokenIdentifier: identity.tokenIdentifier,
+      updatedByName: participant.name,
+      updatedAt: Date.now(),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+      return existing._id;
+    }
+
+    return await ctx.db.insert("meeting_whiteboards", {
+      meetingId: args.meetingId,
+      ...payload,
+    });
   },
 });
 

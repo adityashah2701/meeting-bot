@@ -15,6 +15,7 @@ export type MeetingParticipantStatus =
 export type MeetingSettings = {
   joinMode: MeetingJoinMode;
   allowScreenShare: boolean;
+  allowWhiteboard?: boolean;
   allowChat: boolean;
   allowReactions: boolean;
   allowRecording: boolean;
@@ -29,6 +30,7 @@ export type MeetingPermissions = {
   canRemoveParticipants: boolean;
   canMuteOthers: boolean;
   canShareScreen: boolean;
+  canUseWhiteboard: boolean;
   canSendChat: boolean;
   canStartRecording: boolean;
   canChangeSettings: boolean;

@@ -229,6 +229,15 @@ export default defineSchema({
     .index("by_meetingId_and_createdAt", ["meetingId", "createdAt"])
     .index("by_meetingId_and_status", ["meetingId", "status"]),
 
+  meeting_whiteboards: defineTable({
+    meetingId: v.id("meetings"),
+    isOpen: v.boolean(),
+    scene: v.optional(v.string()),
+    updatedByTokenIdentifier: v.string(),
+    updatedByName: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_meetingId", ["meetingId"]),
+
   notifications: defineTable({
     userTokenIdentifier: v.string(),
     orgId: v.string(),

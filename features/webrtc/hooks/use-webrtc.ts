@@ -348,6 +348,10 @@ export function useWebrtc(meetingId: Id<"meetings">) {
     video?: boolean;
     screen?: boolean;
   }) => {
+    if (participantStatus !== "joined" || !participantId) {
+      return;
+    }
+
     await updateMediaState({
       meetingId,
       isMicEnabled: nextState?.audio ?? !isAudioMuted,

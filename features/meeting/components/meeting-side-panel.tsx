@@ -46,7 +46,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -68,6 +67,7 @@ import type {
 const DEFAULT_SETTINGS: MeetingSettings = {
   joinMode: "organization_only",
   allowScreenShare: true,
+  allowWhiteboard: true,
   allowChat: true,
   allowReactions: true,
   allowRecording: true,
@@ -573,6 +573,7 @@ export function MeetingSidePanel({
                         <div className="rounded-lg border border-border divide-y divide-border">
                           {[
                             ["allowScreenShare", "Allow screen share"],
+                            ["allowWhiteboard", "Allow whiteboard"],
                             ["allowChat", "Allow chat"],
                             ["allowReactions", "Allow reactions"],
                             ["allowRecording", "Allow recording"],

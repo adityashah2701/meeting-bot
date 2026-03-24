@@ -348,12 +348,20 @@ export const updateMedia = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
-    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
-    const participant = await requireJoinedParticipant(
+    const participant = await getMeetingParticipant(
       ctx,
       args.meetingId,
       identity.tokenIdentifier,
     );
+
+    // Media sync calls can race with join/leave transitions during mount,
+    // teardown, or moderation changes. Treat those windows as a harmless no-op
+    // instead of surfacing a server error in the client console.
+    if (!participant || participant.status !== "joined") {
+      return null;
+    }
+
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
 
     if (participant.role === "viewer" && (args.isMicEnabled || args.isCameraEnabled || args.isScreenSharing)) {
       throw new Error("Viewers cannot publish audio or video");

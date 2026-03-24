@@ -14,6 +14,9 @@ export const meetingService = {
   cancelInvite: api.meetings.index.cancelInvite,
   getSummary: api.meetings.index.getSummary,
   saveSummary: api.meetings.index.saveSummary,
+  getWhiteboard: api.meetings.index.getWhiteboard,
+  setWhiteboardOpen: api.meetings.index.setWhiteboardOpen,
+  saveWhiteboardScene: api.meetings.index.saveWhiteboardScene,
   startRecording: api.recordings.index.start,
   stopRecording: api.recordings.index.stop,
   generateRecordingUploadUrl: api.recordings.index.generateUploadUrl,
@@ -61,6 +64,7 @@ type CreateMeetingMutation = (args: {
   settings?: {
     joinMode: "organization_only" | "invite_only" | "anyone_with_link" | "ask_to_join";
     allowScreenShare: boolean;
+    allowWhiteboard?: boolean;
     allowChat: boolean;
     allowReactions: boolean;
     allowRecording: boolean;
