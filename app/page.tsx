@@ -7,7 +7,10 @@ import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import { createMetadata } from '@/lib/metadata';
 
-export const metadata = createMetadata("Home", "AI-powered meeting operations with realtime collaboration, summaries, and workspace analytics.");
+export const metadata = createMetadata(
+  "Home",
+  "AI-powered meeting intelligence — real-time transcription, summaries, and team collaboration in one workspace.",
+);
 
 export default async function HomePage() {
   const { userId } = await auth();
@@ -19,7 +22,7 @@ export default async function HomePage() {
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans selection:bg-primary/20">
       <Navbar />
-      <main className="flex-1 flex flex-col items-center pt-32 pb-20 px-6 lg:px-8">
+      <main className="flex-1 flex flex-col items-center pt-28 pb-0 px-6 lg:px-8 overflow-hidden">
         <Hero />
         <Features />
       </main>

@@ -12,7 +12,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { meetingService } from "@/features/meeting/services/meeting-service";
-import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video, BookText, ExternalLink } from "lucide-react";
+import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video, BookText, ExternalLink, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 
 import React, { useState } from "react";
 import { toast } from "sonner";
@@ -96,11 +97,29 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-5 md:px-6">
 
-      {/* ── Compact Header ── */}
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+      {/* ── Back button ── */}
+      <div className="mb-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-2 text-muted-foreground hover:text-foreground -ml-2"
+          asChild
+        >
+          <Link href="/meetings">
+            <ArrowLeft className="h-4 w-4" />
+            Back to Meetings
+          </Link>
+        </Button>
+      </div>
+
+      {/* ── Hero Header ── */}
+      <div className="mb-6 overflow-hidden rounded-xl border border-border/60 bg-linear-to-br from-card via-card to-muted/30">
+        {/* Top bar */}
+        <div className="relative px-6 py-5">
+          <div className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-primary/5 blur-3xl" />
+
           {/* Meta row */}
-          <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${statusColor}`}
             >
@@ -109,7 +128,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
               )}
               {meeting.status}
             </span>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <CalendarDays className="h-3.5 w-3.5" />
               {creationDate.toLocaleDateString(undefined, {
                 weekday: "short",
@@ -118,91 +137,102 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                 day: "numeric",
               })}
             </span>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
               {creationDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
           </div>
 
-          {/* Title */}
-          <h1 className="truncate text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+          {/* Title + purpose */}
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             {meeting.title}
           </h1>
           {meeting.purpose && (
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground line-clamp-2">
+            <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               {meeting.purpose}
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              disabled={!canExportToNotion}
-              onClick={async () => {
-                setIsExportingToNotion(true);
-                try {
-                  const result = await exportMeetingToNotion({ meetingId });
-                  toast.success("Meeting exported to Notion");
-                  if (result.pageUrl) {
-                    window.open(result.pageUrl, "_blank", "noopener,noreferrer");
-                  }
-                } catch (error) {
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : "Unable to export this meeting to Notion",
-                  );
-                } finally {
-                  setIsExportingToNotion(false);
-                }
-              }}
-            >
-              {isExportingToNotion ? "Exporting..." : "Export to Notion"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!notionExport?.externalUrl}
-              onClick={() => {
-                if (notionExport?.externalUrl) {
-                  window.open(notionExport.externalUrl, "_blank", "noopener,noreferrer");
-                }
-              }}
-            >
-              <ExternalLink className="mr-2 h-4 w-4" />
-              Open Notion Page
-            </Button>
-            {!notionConnection?.connected ? (
-              <p className="text-xs text-muted-foreground">
-                Connect Notion from Integrations before exporting this meeting.
-              </p>
-            ) : null}
-            {notionConnection?.connected && !notionConnection.targetPageId ? (
-              <p className="text-xs text-muted-foreground">
-                Choose a Notion parent page in Integrations before exporting.
-              </p>
-            ) : null}
-            {notionExport?.lastError ? (
-              <p className="text-xs text-destructive">
-                {notionExport.lastError}
-              </p>
-            ) : null}
+          {/* Stat chips */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>{transcripts.length} transcript msgs</span>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+              <Video className="h-3.5 w-3.5" />
+              <span>{recordings.length} recording{recordings.length !== 1 ? "s" : ""}</span>
+            </div>
+            {hasSummary && (
+              <div className="">
+                
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Stats chips */}
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            <MessageSquare className="h-3.5 w-3.5" />
-            <span>{transcripts.length} msgs</span>
-          </div>
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            <Video className="h-3.5 w-3.5" />
-            <span>{recordings.length} rec{recordings.length !== 1 ? "s" : ""}</span>
-          </div>
-          {hasSummary && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary">
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>AI Summary</span>
-            </div>
+        {/* Notion export bar */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-border/60 bg-muted/20 px-6 py-3">
+          <Button
+            size="sm"
+            disabled={!canExportToNotion}
+            onClick={async () => {
+              setIsExportingToNotion(true);
+              try {
+                const result = await exportMeetingToNotion({ meetingId });
+                toast.success("Meeting exported to Notion");
+                if (result.pageUrl) {
+                  window.open(result.pageUrl, "_blank", "noopener,noreferrer");
+                }
+              } catch (error) {
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : "Unable to export this meeting to Notion",
+                );
+              } finally {
+                setIsExportingToNotion(false);
+              }
+            }}
+            className="h-8 gap-1.5 text-xs"
+          >
+            <BookText className="h-3.5 w-3.5" />
+            {isExportingToNotion ? "Exporting…" : "Export to Notion"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!notionExport?.externalUrl}
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => {
+              if (notionExport?.externalUrl) {
+                window.open(notionExport.externalUrl, "_blank", "noopener,noreferrer");
+              }
+            }}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open in Notion
+          </Button>
+          {!notionConnection?.connected && (
+            <p className="text-xs text-muted-foreground">
+              Connect Notion from{" "}
+              <a href="/integrations" className="underline underline-offset-2">
+                Integrations
+              </a>{" "}
+              to export.
+            </p>
+          )}
+          {notionConnection?.connected && !notionConnection.targetPageId && (
+            <p className="text-xs text-muted-foreground">
+              Choose a Notion parent page in{" "}
+              <a href="/integrations" className="underline underline-offset-2">
+                Integrations
+              </a>
+              .
+            </p>
+          )}
+          {notionExport?.lastError && (
+            <p className="text-xs text-destructive">{notionExport.lastError}</p>
           )}
         </div>
       </div>
