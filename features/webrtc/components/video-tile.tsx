@@ -33,6 +33,7 @@ export function VideoTile({
   isPresentation?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const shouldRenderVideo = Boolean(stream && (isCameraEnabled || isPresentation));
   // Use dedicated audioStream for speaking detection when provided
   // (local tile sends audio-only stream; remote tiles carry both).
@@ -48,20 +49,15 @@ export function VideoTile({
     const el = videoRef.current;
     if (!el) return;
 
+    // Keep the visual element muted. Remote audio is played via a dedicated
+    // hidden audio element so autoplay retries don't permanently mute peers.
+    el.muted = true;
     el.srcObject = shouldRenderVideo ? stream : null;
 
     if (!stream || !shouldRenderVideo) return;
 
-    // Autoplay policy can block play() even with the autoplay attribute.
-    // We call play() explicitly and retry muted if the browser blocks it.
     const attemptPlay = () => {
-      el.play().catch(() => {
-        // Autoplay was blocked — retry muted (browsers always allow muted autoplay).
-        if (!el.muted) {
-          el.muted = true;
-          el.play().catch(() => undefined);
-        }
-      });
+      el.play().catch(() => undefined);
     };
 
     attemptPlay();
@@ -78,6 +74,90 @@ export function VideoTile({
     };
   }, [shouldRenderVideo, stream]);
 
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+
+    const hasLiveRemoteAudio = Boolean(
+      !isLocal
+      && stream
+      && stream.getAudioTracks().some((track) => track.readyState === "live"),
+    );
+
+    el.srcObject = hasLiveRemoteAudio ? stream : null;
+    el.muted = false;
+
+    if (!stream || !hasLiveRemoteAudio) {
+      return;
+    }
+
+    let removeInteractionFallback: (() => void) | null = null;
+
+    const clearInteractionFallback = () => {
+      removeInteractionFallback?.();
+      removeInteractionFallback = null;
+    };
+
+    const registerInteractionFallback = () => {
+      if (removeInteractionFallback || typeof window === "undefined") {
+        return;
+      }
+
+      const retryPlayback = () => {
+        void el.play()
+          .then(() => {
+            clearInteractionFallback();
+          })
+          .catch(() => undefined);
+      };
+
+      const options = { capture: true } as AddEventListenerOptions;
+      window.addEventListener("pointerdown", retryPlayback, options);
+      window.addEventListener("keydown", retryPlayback, options);
+      window.addEventListener("touchstart", retryPlayback, options);
+
+      removeInteractionFallback = () => {
+        window.removeEventListener("pointerdown", retryPlayback, options);
+        window.removeEventListener("keydown", retryPlayback, options);
+        window.removeEventListener("touchstart", retryPlayback, options);
+      };
+    };
+
+    const attemptPlay = () => {
+      void el.play()
+        .then(() => {
+          clearInteractionFallback();
+        })
+        .catch(() => {
+          registerInteractionFallback();
+        });
+    };
+
+    attemptPlay();
+
+    const onTrackChange = () => {
+      const nextHasLiveAudio = stream.getAudioTracks().some(
+        (track) => track.readyState === "live",
+      );
+      el.srcObject = nextHasLiveAudio ? stream : null;
+      if (nextHasLiveAudio) {
+        attemptPlay();
+      } else {
+        clearInteractionFallback();
+      }
+    };
+
+    stream.addEventListener("addtrack", onTrackChange);
+    stream.addEventListener("removetrack", onTrackChange);
+
+    return () => {
+      clearInteractionFallback();
+      stream.removeEventListener("addtrack", onTrackChange);
+      stream.removeEventListener("removetrack", onTrackChange);
+      el.srcObject = null;
+    };
+  }, [isLocal, stream]);
+
   return (
     <div
       className={cn(
@@ -90,7 +170,7 @@ export function VideoTile({
         <video
           ref={videoRef}
           autoPlay
-          muted={isLocal}
+          muted
           playsInline
           className={cn(
             "h-full w-full",
@@ -134,6 +214,7 @@ export function VideoTile({
           {isScreenSharing && <MonitorUp className="h-3.5 w-3.5" />}
         </div>
       </div>
+      <audio ref={audioRef} autoPlay hidden aria-hidden="true" />
     </div>
   );
 }
