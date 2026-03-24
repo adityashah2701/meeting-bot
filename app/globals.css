@@ -137,3 +137,38 @@
     scroll-margin-top: 80px;
   }
 }
+
+/* ── Landing page animations ── */
+
+@keyframes shimmer {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 100% center; }
+}
+
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(12px, -8px) scale(1.02); }
+  66% { transform: translate(-8px, 6px) scale(0.98); }
+}
+
+/* Staggered entrance animation classes */
+.landing-animate {
+  opacity: 0;
+  transform: translateY(16px);
+  animation: landing-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes landing-enter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing-animate-delay-1 { animation-delay: 0ms; }
+.landing-animate-delay-2 { animation-delay: 80ms; }
+.landing-animate-delay-3 { animation-delay: 160ms; }
+.landing-animate-delay-4 { animation-delay: 240ms; }
+.landing-animate-delay-5 { animation-delay: 340ms; }
+.landing-animate-delay-6 { animation-delay: 480ms; }
+
