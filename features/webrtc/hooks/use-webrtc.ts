@@ -112,6 +112,9 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   // Buffer for ICE candidates that arrived before setRemoteDescription.
   const earlyIceBufferRef = useRef<EarlyIceBuffer>({});
+  // Process signaling messages sequentially per peer to avoid offer/answer
+  // races that can flip signalingState mid-handler.
+  const signalProcessingChainsRef = useRef<Record<string, Promise<void>>>({});
   // Debounce rapid camera toggling. Each toggle call stores a fresh symbol;
   // async continuations check whether their token is still current before
   // applying side-effects, discarding stale calls.
@@ -456,6 +459,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       delete peersRef.current[remoteParticipantId];
       delete pendingIceCandidatesRef.current[remoteParticipantId];
       delete earlyIceBufferRef.current[remoteParticipantId];
+      delete signalProcessingChainsRef.current[remoteParticipantId];
 
       setRemoteCameraStreams((current) => {
         if (!(remoteParticipantId in current)) {
@@ -783,8 +787,9 @@ export function useWebrtc(meetingId: Id<"meetings">) {
       processedSignalIdsRef.current.add(signal._id);
     });
 
-    void Promise.all(
-      pendingSignals.map(async (signal) => {
+    const enqueueSignalProcessing = (signal: (typeof pendingSignals)[number]) => {
+      const peerId = signal.senderParticipantId;
+      const runSignal = async () => {
         const payload = JSON.parse(signal.payload) as SignalPayload;
         const connection = await createPeerConnection(
           signal.senderParticipantId,
@@ -975,7 +980,25 @@ export function useWebrtc(meetingId: Id<"meetings">) {
             }
           }
         }
-      }),
+      };
+
+      const previous = signalProcessingChainsRef.current[peerId] ?? Promise.resolve();
+      const next = previous
+        .catch(() => undefined)
+        .then(runSignal);
+      signalProcessingChainsRef.current[peerId] = next
+        .catch(() => undefined)
+        .finally(() => {
+          if (signalProcessingChainsRef.current[peerId] === next) {
+            delete signalProcessingChainsRef.current[peerId];
+          }
+        });
+
+      return next;
+    };
+
+    void Promise.all(
+      pendingSignals.map((signal) => enqueueSignalProcessing(signal)),
     )
       .then(() =>
         clearSignals({
