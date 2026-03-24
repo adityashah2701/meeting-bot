@@ -63,20 +63,42 @@ type NotionRichText = {
       url: string;
     };
   };
+  annotations?: {
+    bold?: boolean;
+    italic?: boolean;
+    code?: boolean;
+    strikethrough?: boolean;
+    underline?: boolean;
+    color?:
+      | "default"
+      | "gray"
+      | "brown"
+      | "orange"
+      | "yellow"
+      | "green"
+      | "blue"
+      | "purple"
+      | "pink"
+      | "red";
+  };
 };
 type NotionBlock = {
   object: "block";
   type:
-    | "heading_1"
     | "heading_2"
+    | "heading_3"
     | "paragraph"
     | "bulleted_list_item"
-    | "to_do";
-  heading_1?: { rich_text: NotionRichText[] };
+    | "numbered_list_item"
+    | "to_do"
+    | "divider";
   heading_2?: { rich_text: NotionRichText[] };
+  heading_3?: { rich_text: NotionRichText[] };
   paragraph?: { rich_text: NotionRichText[] };
   bulleted_list_item?: { rich_text: NotionRichText[] };
+  numbered_list_item?: { rich_text: NotionRichText[] };
   to_do?: { rich_text: NotionRichText[]; checked: boolean };
+  divider?: Record<string, never>;
 };
 type NotionPageCreateResponse = {
   id: string;
@@ -204,74 +226,258 @@ function chunkText(value: string, maxLength = NOTION_PAGE_TEXT_LIMIT) {
   return chunks;
 }
 
-function createRichText(content: string, link?: string): NotionRichText[] {
+function createRichTextFragment(
+  content: string,
+  options?: {
+    link?: string;
+    annotations?: NotionRichText["annotations"];
+  },
+): NotionRichText | null {
   if (!content.trim()) {
+    return null;
+  }
+
+  return {
+    type: "text",
+    text: {
+      content,
+      ...(options?.link ? { link: { url: options.link } } : {}),
+    },
+    ...(options?.annotations ? { annotations: options.annotations } : {}),
+  };
+}
+
+function createRichText(
+  content: string,
+  link?: string,
+  annotations?: NotionRichText["annotations"],
+): NotionRichText[] {
+  const fragment = createRichTextFragment(content, { link, annotations });
+  return fragment ? [fragment] : [];
+}
+
+function createMarkdownRichText(content: string): NotionRichText[] {
+  const text = content.trim();
+  if (!text) {
     return [];
   }
 
-  return [
-    {
-      type: "text",
-      text: {
-        content,
-        ...(link ? { link: { url: link } } : {}),
-      },
+  const tokenRegex =
+    /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*)/g;
+  const richText: NotionRichText[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(tokenRegex)) {
+    const [token, , linkLabel, linkUrl, boldText, codeText, italicText] = match;
+    const tokenIndex = match.index ?? 0;
+
+    if (tokenIndex > lastIndex) {
+      richText.push(...createRichText(text.slice(lastIndex, tokenIndex)));
+    }
+
+    if (linkLabel && linkUrl) {
+      richText.push(...createRichText(linkLabel, linkUrl));
+    } else if (boldText) {
+      richText.push(...createRichText(boldText, undefined, { bold: true }));
+    } else if (codeText) {
+      richText.push(...createRichText(codeText, undefined, { code: true }));
+    } else if (italicText) {
+      richText.push(...createRichText(italicText, undefined, { italic: true }));
+    } else {
+      richText.push(...createRichText(token));
+    }
+
+    lastIndex = tokenIndex + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    richText.push(...createRichText(text.slice(lastIndex)));
+  }
+
+  return richText.length > 0 ? richText : createRichText(text);
+}
+
+function createBlockFromRichText(
+  type:
+    | "paragraph"
+    | "bulleted_list_item"
+    | "numbered_list_item"
+    | "to_do",
+  richText: NotionRichText[],
+  options?: {
+    checked?: boolean;
+  },
+) {
+  if (richText.length === 0) {
+    return null;
+  }
+
+  if (type === "paragraph") {
+    return {
+      object: "block" as const,
+      type,
+      paragraph: { rich_text: richText },
+    };
+  }
+
+  if (type === "bulleted_list_item") {
+    return {
+      object: "block" as const,
+      type,
+      bulleted_list_item: { rich_text: richText },
+    };
+  }
+
+  if (type === "numbered_list_item") {
+    return {
+      object: "block" as const,
+      type,
+      numbered_list_item: { rich_text: richText },
+    };
+  }
+
+  return {
+    object: "block" as const,
+    type,
+    to_do: {
+      rich_text: richText,
+      checked: options?.checked ?? false,
     },
-  ];
+  };
 }
 
 function createTextBlocks(
-  type: "paragraph" | "bulleted_list_item" | "to_do",
+  type: "paragraph" | "bulleted_list_item" | "numbered_list_item" | "to_do",
   value: string,
   options?: {
     link?: string;
     checked?: boolean;
+    markdown?: boolean;
   },
 ) {
   return chunkText(value).map<NotionBlock>((chunk) => {
-    const richText = createRichText(chunk, options?.link);
-    if (type === "paragraph") {
-      return {
-        object: "block",
-        type,
-        paragraph: { rich_text: richText },
-      };
-    }
-
-    if (type === "bulleted_list_item") {
-      return {
-        object: "block",
-        type,
-        bulleted_list_item: { rich_text: richText },
-      };
-    }
-
-    return {
-      object: "block",
-      type,
-      to_do: {
-        rich_text: richText,
-        checked: options?.checked ?? false,
-      },
-    };
+    const richText = options?.markdown
+      ? createMarkdownRichText(chunk)
+      : createRichText(chunk, options?.link);
+    return createBlockFromRichText(type, richText, {
+      checked: options?.checked,
+    })!;
   });
 }
 
-function createHeadingBlock(level: "heading_1" | "heading_2", value: string): NotionBlock {
+function createHeadingBlock(
+  level: "heading_2" | "heading_3",
+  value: string,
+): NotionBlock {
   const richText = createRichText(value.slice(0, NOTION_PAGE_TEXT_LIMIT));
-  if (level === "heading_1") {
+  if (level === "heading_2") {
     return {
       object: "block",
       type: level,
-      heading_1: { rich_text: richText },
+      heading_2: { rich_text: richText },
     };
   }
 
   return {
     object: "block",
     type: level,
-    heading_2: { rich_text: richText },
+    heading_3: { rich_text: richText },
   };
+}
+
+function createDividerBlock(): NotionBlock {
+  return {
+    object: "block",
+    type: "divider",
+    divider: {},
+  };
+}
+
+function createLabeledListItem(
+  label: string,
+  value: string,
+  options?: {
+    link?: string;
+  },
+) {
+  const richText = [
+    ...createRichText(`${label}: `, undefined, { bold: true }),
+    ...(options?.link ? createRichText(value, options.link) : createMarkdownRichText(value)),
+  ];
+  const block = createBlockFromRichText("bulleted_list_item", richText);
+  return block ? [block] : [];
+}
+
+function parseMarkdownToBlocks(markdown: string) {
+  const lines = markdown
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd());
+  const blocks: NotionBlock[] = [];
+  let paragraphLines: string[] = [];
+
+  const flushParagraph = () => {
+    const paragraph = paragraphLines.join(" ").trim();
+    paragraphLines = [];
+    if (!paragraph) {
+      return;
+    }
+    blocks.push(...createTextBlocks("paragraph", paragraph, { markdown: true }));
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    const todoMatch = trimmed.match(/^[-*]\s+\[( |x|X)\]\s+(.+)$/);
+    if (todoMatch) {
+      flushParagraph();
+      blocks.push(
+        ...createTextBlocks("to_do", todoMatch[2], {
+          checked: todoMatch[1].toLowerCase() === "x",
+          markdown: true,
+        }),
+      );
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^#{1,3}\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      blocks.push(createHeadingBlock("heading_3", headingMatch[1]));
+      continue;
+    }
+
+    const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (numberedMatch) {
+      flushParagraph();
+      blocks.push(
+        ...createTextBlocks("numbered_list_item", numberedMatch[1], {
+          markdown: true,
+        }),
+      );
+      continue;
+    }
+
+    const bulletMatch = trimmed.match(/^[-*+]\s+(.+)$/);
+    if (bulletMatch) {
+      flushParagraph();
+      blocks.push(
+        ...createTextBlocks("bulleted_list_item", bulletMatch[1], {
+          markdown: true,
+        }),
+      );
+      continue;
+    }
+
+    paragraphLines.push(trimmed);
+  }
+
+  flushParagraph();
+  return blocks;
 }
 
 function createSectionBlocks(
@@ -321,36 +527,50 @@ function buildNotionMeetingBlocks(args: {
 }) {
   const joinUrl = getMeetingJoinUrl(args.meeting._id);
   const detailUrl = buildPublicAppUrl(`/meeting/${args.meeting._id}/details`);
-  const blocks: NotionBlock[] = [
-    createHeadingBlock("heading_1", args.meeting.title),
-    ...createTextBlocks("paragraph", `Status: ${args.meeting.status}`),
-  ];
+  const blocks: NotionBlock[] = [];
+  const statusLabel =
+    args.meeting.status.charAt(0).toUpperCase() + args.meeting.status.slice(1);
 
   const scheduledLabel = formatMeetingTimestamp(
     args.meeting.scheduledFor,
     args.meeting.scheduledTimeZone,
   );
+  const snapshotBlocks: NotionBlock[] = [
+    ...createLabeledListItem("Status", statusLabel),
+  ];
   if (scheduledLabel) {
-    blocks.push(...createTextBlocks("paragraph", `Scheduled for: ${scheduledLabel}`));
+    snapshotBlocks.push(...createLabeledListItem("Scheduled for", scheduledLabel));
   }
   if (args.meeting.purpose) {
-    blocks.push(...createTextBlocks("paragraph", `Purpose: ${args.meeting.purpose}`));
+    snapshotBlocks.push(...createLabeledListItem("Purpose", args.meeting.purpose));
   }
   if (args.meeting.description) {
-    blocks.push(...createTextBlocks("paragraph", `Notes: ${args.meeting.description}`));
+    snapshotBlocks.push(...createLabeledListItem("Notes", args.meeting.description));
   }
+
+  blocks.push(...createSectionBlocks("Meeting Snapshot", snapshotBlocks));
+
+  const linkBlocks: NotionBlock[] = [];
   if (joinUrl) {
-    blocks.push(...createTextBlocks("paragraph", "Join meeting", { link: joinUrl }));
+    linkBlocks.push(...createLabeledListItem("Join meeting", "Open live room", { link: joinUrl }));
   }
   if (detailUrl) {
-    blocks.push(...createTextBlocks("paragraph", "Open meeting details in Meeting Bot", { link: detailUrl }));
+    linkBlocks.push(
+      ...createLabeledListItem("Meeting details", "Open in Meeting Bot", {
+        link: detailUrl,
+      }),
+    );
+  }
+  blocks.push(...createSectionBlocks("Links", linkBlocks));
+  if (blocks.length > 0) {
+    blocks.push(createDividerBlock());
   }
 
   blocks.push(
     ...createSectionBlocks(
       "Summary",
       args.meeting.summary
-        ? createTextBlocks("paragraph", args.meeting.summary)
+        ? parseMarkdownToBlocks(args.meeting.summary)
         : createTextBlocks("paragraph", "Summary not generated yet."),
     ),
   );
@@ -375,14 +595,25 @@ function buildNotionMeetingBlocks(args: {
     ...createSectionBlocks(
       "Action Items",
       args.meeting.action_items.flatMap((item) => {
-        const parts = [item.task];
-        if (item.assignee) {
-          parts.push(`Assignee: ${item.assignee}`);
-        }
-        if (item.due) {
-          parts.push(`Due: ${item.due}`);
-        }
-        return createTextBlocks("to_do", parts.join(" | "));
+        const richText = [
+          ...createMarkdownRichText(item.task),
+          ...(item.assignee
+            ? [
+                ...createRichText(" | ", undefined),
+                ...createRichText("Assignee: ", undefined, { bold: true }),
+                ...createRichText(item.assignee),
+              ]
+            : []),
+          ...(item.due
+            ? [
+                ...createRichText(" | ", undefined),
+                ...createRichText("Due: ", undefined, { bold: true }),
+                ...createRichText(item.due),
+              ]
+            : []),
+        ];
+        const block = createBlockFromRichText("to_do", richText);
+        return block ? [block] : [];
       }),
     ),
   );
@@ -402,15 +633,41 @@ function buildNotionMeetingBlocks(args: {
 
   blocks.push(...createSectionBlocks("Recordings", recordingBlocks));
 
-  const transcriptBlocks = args.transcripts.flatMap((line) =>
-    createTextBlocks(
-      "paragraph",
-      `${line.speakerName} (${formatMeetingTimestamp(line.timestamp) ?? "Unknown time"}): ${line.text}`,
-    ),
-  );
+  const transcriptBlocks = args.transcripts.flatMap((line) => {
+    const richText = [
+      ...createRichText(line.speakerName || "Unknown speaker", undefined, {
+        bold: true,
+      }),
+      ...createRichText(
+        ` (${formatMeetingTimestamp(line.timestamp) ?? "Unknown time"})`,
+        undefined,
+        { italic: true, color: "gray" },
+      ),
+      ...createRichText(": "),
+      ...createMarkdownRichText(line.text),
+    ];
+    const block = createBlockFromRichText("paragraph", richText);
+    return block ? [block] : [];
+  });
   blocks.push(...createSectionBlocks("Transcript", transcriptBlocks));
 
   return blocks;
+}
+
+function buildNotionMeetingPageTitle(meeting: {
+  title: string;
+  scheduledFor?: number;
+  scheduledTimeZone?: string;
+}) {
+  const scheduledLabel = formatMeetingTimestamp(
+    meeting.scheduledFor,
+    meeting.scheduledTimeZone,
+  );
+  const parts = [meeting.title.trim() || "Meeting"];
+  if (scheduledLabel) {
+    parts.push(scheduledLabel);
+  }
+  return parts.join(" | ").slice(0, NOTION_PAGE_TEXT_LIMIT);
 }
 
 type NotionApiRequestOptions = {
@@ -1143,7 +1400,7 @@ export const exportMeetingToNotion = action({
           },
           properties: {
             title: {
-              title: createRichText(meeting.title.slice(0, NOTION_PAGE_TEXT_LIMIT)),
+              title: createRichText(buildNotionMeetingPageTitle(meeting)),
             },
           },
           children: firstChunk,
