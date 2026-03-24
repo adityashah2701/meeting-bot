@@ -33,6 +33,10 @@ import {
   resolveInviteStatus,
 } from "../lib/invitations";
 import { formatMeetingTimeRange } from "../../lib/meeting-schedule";
+import {
+  getInvitationEmailConfig,
+  getInvitationEmailConfigError,
+} from "../../lib/invitation-email-config";
 import { buildPublicAppUrl } from "../../lib/public-app-url";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -132,6 +136,7 @@ async function deliverInvite(
     inviteToken: string;
   },
 ) {
+  const invitationEmailConfig = getInvitationEmailConfig();
   const invitedUser = await getUserRecordByEmail(ctx, args.email);
   if (invitedUser) {
     await createOrRefreshInviteNotification(ctx, {
@@ -147,14 +152,10 @@ async function deliverInvite(
   await ctx.db.patch(args.inviteId, {
     invitedUserTokenIdentifier: invitedUser?.tokenIdentifier,
     lastNotificationAt: invitedUser ? Date.now() : undefined,
-    emailDeliveryStatus:
-      process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL
-        ? "pending"
-        : "failed",
-    lastEmailError:
-      process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL
-        ? undefined
-        : "Invite email is not configured in Convex. Add RESEND_API_KEY and INVITATION_FROM_EMAIL to the deployment environment.",
+    emailDeliveryStatus: invitationEmailConfig ? "pending" : "failed",
+    lastEmailError: invitationEmailConfig
+      ? undefined
+      : getInvitationEmailConfigError(),
   });
 
   const organizationName = await getOrganizationName(ctx, args.orgId);
@@ -162,7 +163,7 @@ async function deliverInvite(
   const calendarBaseUrl = buildPublicAppUrl(
     `/api/invitations/${args.inviteId}/calendar`,
   );
-  if (process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL) {
+  if (invitationEmailConfig) {
     await ctx.scheduler.runAfter(0, internal.invitationsDelivery.sendMeetingInviteEmail, {
       inviteId: args.inviteId,
       toEmail: args.email,

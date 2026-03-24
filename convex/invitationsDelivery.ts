@@ -1,7 +1,14 @@
+"use node";
+
 import { v } from "convex/values";
+import nodemailer from "nodemailer";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { formatMeetingTimeRange, resolveScheduledEndsAt } from "../lib/meeting-schedule";
+import {
+  getInvitationEmailConfig,
+  getInvitationEmailConfigError,
+} from "../lib/invitation-email-config";
 
 export const sendMeetingInviteEmail = internalAction({
   args: {
@@ -19,15 +26,13 @@ export const sendMeetingInviteEmail = internalAction({
     inviteToken: v.string(),
   },
   handler: async (ctx, args) => {
-    const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.INVITATION_FROM_EMAIL;
+    const emailConfig = getInvitationEmailConfig();
 
-    if (!apiKey || !fromEmail) {
+    if (!emailConfig) {
       await ctx.runMutation(internal.invitationEmailState.markEmailDelivery, {
         inviteId: args.inviteId,
         emailDeliveryStatus: "failed",
-        lastEmailError:
-          "Invite email is not configured in Convex. Add RESEND_API_KEY and INVITATION_FROM_EMAIL to the deployment environment.",
+        lastEmailError: getInvitationEmailConfigError(),
       });
       return { sent: false, reason: "missing_config" } as const;
     }
@@ -50,15 +55,22 @@ export const sendMeetingInviteEmail = internalAction({
       ? `${args.calendarBaseUrl}?provider=ics&token=${encodeURIComponent(args.inviteToken)}`
       : null;
 
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [args.toEmail],
+    const transporter = "smtpUrl" in emailConfig
+      ? nodemailer.createTransport(emailConfig.smtpUrl)
+      : nodemailer.createTransport({
+          host: emailConfig.host,
+          port: emailConfig.port,
+          secure: emailConfig.secure,
+          auth: {
+            user: emailConfig.user,
+            pass: emailConfig.pass,
+          },
+        });
+
+    try {
+      await transporter.sendMail({
+        from: emailConfig.fromEmail,
+        to: args.toEmail,
         subject: `Meeting invite: ${args.meetingTitle}`,
         html: `
           <div style="font-family: Inter, Arial, sans-serif; line-height: 1.5; color: #171717;">
@@ -92,15 +104,14 @@ export const sendMeetingInviteEmail = internalAction({
             <p style="font-size: 12px; color: #6b7280;">If the meeting is live, you can join instantly from the app.</p>
           </div>
         `,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
+      });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Email provider rejected the invite email.";
       await ctx.runMutation(internal.invitationEmailState.markEmailDelivery, {
         inviteId: args.inviteId,
         emailDeliveryStatus: "failed",
-        lastEmailError: errorText || "Email provider rejected the invite email.",
+        lastEmailError: errorMessage,
       });
       return { sent: false, reason: "provider_error" } as const;
     }
