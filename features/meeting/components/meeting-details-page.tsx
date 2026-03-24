@@ -134,7 +134,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
       </div>
 
       {/* ── Main content — 2-col on large screens ── */}
-      <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
+      <div className="grid gap-4 lg:grid-cols-2">
 
         {/* LEFT: Transcript */}
         <div className="flex min-h-0 flex-col rounded-xl border border-border bg-card overflow-hidden">
@@ -402,7 +402,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                             <video
                               controls
                               src={recording.playbackUrl}
-                              className="w-full rounded-md border border-border"
+                              className="w-full aspect-video rounded-md border border-border"
                               onPlay={() => setActiveRecordingId(recording._id)}
                               onPause={() =>
                                 setActiveRecordingId((cur) =>
