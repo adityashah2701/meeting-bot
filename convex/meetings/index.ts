@@ -102,7 +102,7 @@ async function createOrRefreshInviteNotification(
     kind: "meeting_invitation",
     title: "Meeting invitation",
     message: `You’ve been invited to ${args.meetingTitle} by ${args.inviterName}`,
-    link: `/invitations?invite=${args.inviteId}`,
+    link: "/dashboard#invitation-inbox",
     invitationId: args.inviteId,
     meetingId: args.meetingId,
     isRead: false,
@@ -159,7 +159,7 @@ async function deliverInvite(
   });
 
   const organizationName = await getOrganizationName(ctx, args.orgId);
-  const meetingLink = buildPublicAppUrl(`/invitations?invite=${args.inviteId}`);
+  const meetingLink = buildPublicAppUrl("/dashboard#invitation-inbox");
   const calendarBaseUrl = buildPublicAppUrl(
     `/api/invitations/${args.inviteId}/calendar`,
   );

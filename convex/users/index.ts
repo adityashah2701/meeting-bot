@@ -307,7 +307,7 @@ export const syncUser = mutation({
             kind: "meeting_invitation",
             title: "Meeting invitation",
             message: `You’ve been invited to ${meeting.title} by ${invite.invitedByName}`,
-            link: `/invitations?invite=${invite._id}`,
+            link: "/dashboard#invitation-inbox",
             invitationId: invite._id,
             meetingId: invite.meetingId,
             isRead: false,

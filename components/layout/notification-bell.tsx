@@ -17,6 +17,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 
+function resolveNotificationLink(link?: string) {
+  if (!link) {
+    return null;
+  }
+
+  if (link === "/invitations" || link.startsWith("/invitations?")) {
+    return "/dashboard#invitation-inbox";
+  }
+
+  return link;
+}
+
 export function NotificationBell() {
   const { organization } = useOrganization();
   const { user } = useUser();
@@ -50,11 +62,12 @@ export function NotificationBell() {
 
       seenNotificationIdsRef.current.add(notification._id);
       if (!notification.isRead && notification.kind === "meeting_invitation") {
+        const notificationLink = resolveNotificationLink(notification.link);
         toast.message(notification.message, {
-          action: notification.link
+          action: notificationLink
             ? {
-                label: "Open",
-                onClick: () => router.push(notification.link!),
+                label: "Open inbox",
+                onClick: () => router.push(notificationLink),
               }
             : undefined,
         });
@@ -88,36 +101,49 @@ export function NotificationBell() {
           <div className="p-4 text-center text-sm text-muted-foreground">No new notifications</div>
         ) : (
           <div className="py-2">
-            {notifications.map((n) => (
-              <DropdownMenuItem key={n._id} className="cursor-pointer" asChild>
-                <div 
-                  className={`flex flex-col gap-1 px-4 py-3 ${!n.isRead ? 'bg-primary/5' : ''}`}
-                  onClick={() => {
-                    if (!n.isRead) markRead({ notificationId: n._id });
-                    if (n.link) {
-                      router.push(n.link);
-                    }
-                  }}
-                >
-                  {n.title ? (
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                      {n.title}
+            {notifications.map((notification) => {
+              const notificationLink = resolveNotificationLink(notification.link);
+              const ctaLabel = notification.kind === "meeting_invitation"
+                ? "Open inbox"
+                : "View meeting";
+
+              return (
+                <DropdownMenuItem key={notification._id} className="cursor-pointer" asChild>
+                  <div
+                    className={`flex flex-col gap-1 px-4 py-3 ${!notification.isRead ? 'bg-primary/5' : ''}`}
+                    onClick={() => {
+                      if (!notification.isRead) {
+                        markRead({ notificationId: notification._id });
+                      }
+                      if (notificationLink) {
+                        router.push(notificationLink);
+                      }
+                    }}
+                  >
+                    {notification.title ? (
+                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        {notification.title}
+                      </span>
+                    ) : null}
+                    <span className={`text-sm ${!notification.isRead ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
+                      {notification.message}
                     </span>
-                  ) : null}
-                  <span className={`text-sm ${!n.isRead ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
-                    {n.message}
-                  </span>
-                  {n.link && (
-                    <Link href={n.link} className="text-xs text-primary hover:underline mt-1" onClick={(event) => event.stopPropagation()}>
-                      {n.kind === "meeting_invitation" ? "Open invitation" : "View Meeting"}
-                    </Link>
-                  )}
-                  <span className="text-[10px] text-muted-foreground mt-1">
-                    {new Date(n.createdAt).toLocaleTimeString()}
-                  </span>
-                </div>
-              </DropdownMenuItem>
-            ))}
+                    {notificationLink ? (
+                      <Link
+                        href={notificationLink}
+                        className="mt-1 text-xs text-primary hover:underline"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {ctaLabel}
+                      </Link>
+                    ) : null}
+                    <span className="mt-1 text-[10px] text-muted-foreground">
+                      {new Date(notification.createdAt).toLocaleTimeString()}
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              );
+            })}
           </div>
         )}
       </DropdownMenuContent>

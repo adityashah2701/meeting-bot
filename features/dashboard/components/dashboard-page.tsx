@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useOrganization } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { Activity, CalendarDays, CheckSquare, FileText, Inbox, Radio } from "lucide-react";
+import type { Id } from "@/convex/_generated/dataModel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -20,6 +22,7 @@ const statConfig = [
 
 export function DashboardPage() {
   const { organization } = useOrganization();
+  const respondToInvitation = useMutation(invitationService.respondToInvitation);
   const overview = useQuery(
     dashboardService.getOverview,
     organization?.id ? { orgId: organization.id } : "skip",
@@ -32,6 +35,25 @@ export function DashboardPage() {
   if (overview === undefined) {
     return <LoadingBlock className="h-80 w-full" />;
   }
+
+  const handleRespond = async (
+    invitationId: Id<"meeting_invites">,
+    response: "accepted" | "declined",
+  ) => {
+    try {
+      await respondToInvitation({
+        invitationId,
+        response,
+      });
+      toast.success(
+        response === "accepted"
+          ? "Invitation accepted"
+          : "Invitation declined",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update invitation");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -139,17 +161,14 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="border-border">
+      <Card id="invitation-inbox" className="border-border scroll-mt-24">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Invitation inbox</CardTitle>
             <p className="text-sm text-muted-foreground">
-              New meeting invites land here instantly, with direct accept and join actions.
+              New meeting invites land here instantly, with direct accept, decline, and join actions.
             </p>
           </div>
-          <Button variant="outline" asChild>
-            <Link href="/invitations">Open inbox</Link>
-          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {invitations === undefined ? (
@@ -176,9 +195,21 @@ export function DashboardPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {invite.invitationStatus === "pending" ? (
-                    <Button size="sm" asChild>
-                      <Link href={`/invitations?invite=${invite._id}`}>Review invite</Link>
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleRespond(invite._id, "declined")}
+                      >
+                        Decline
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => void handleRespond(invite._id, "accepted")}
+                      >
+                        Accept
+                      </Button>
+                    </>
                   ) : null}
                   {invite.canJoin ? (
                     <Button size="sm" variant="outline" asChild>

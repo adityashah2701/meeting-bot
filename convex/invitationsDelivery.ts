@@ -79,14 +79,14 @@ export const sendMeetingInviteEmail = internalAction({
             <p><strong>When:</strong> ${when}</p>
             ${args.meetingLink ? `<p style="margin: 20px 0;">
               <a href="${args.meetingLink}" style="display: inline-block; padding: 12px 16px; background: #111827; color: #ffffff; text-decoration: none; border-radius: 10px;">
-                Open invitation
+                Open invite inbox
               </a>
-            </p>` : `<p style="margin: 20px 0; font-size: 13px; color: #b45309;">The app public URL is not configured yet, so a direct join link is not available in this email.</p>`}
+            </p>` : `<p style="margin: 20px 0; font-size: 13px; color: #b45309;">The app public URL is not configured yet, so a direct invite inbox link is not available in this email.</p>`}
             ${
               typeof args.scheduledFor === "number" && googleCalendarLink && outlookCalendarLink && icsDownloadLink
                 ? `
             <div style="margin: 20px 0;">
-              <p style="margin-bottom: 10px; font-size: 13px; color: #4b5563;">Add this meeting to your calendar:</p>
+              <p style="margin-bottoms: 10px; font-size: 13px; color: #4b5563;">Add this meeting to your calendar:</p>
               <div>
                 <a href="${googleCalendarLink}" style="display: inline-block; margin-right: 8px; margin-bottom: 8px; padding: 10px 14px; border: 1px solid #d1d5db; color: #111827; text-decoration: none; border-radius: 10px;">
                   Google Calendar

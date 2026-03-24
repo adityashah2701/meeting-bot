@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, LayoutDashboard, CalendarDays, LineChart, Building2, CheckSquare, Inbox, Settings, Sparkles, Plug } from "lucide-react";
+import { Menu, LayoutDashboard, CalendarDays, LineChart, CheckSquare, Sparkles, Plug } from "lucide-react";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,13 +16,10 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/invitations", label: "Invitations", icon: Inbox },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
   { href: "/insights", label: "Insights", icon: LineChart },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
   { href: "/integrations", label: "Integrations", icon: Plug },
-  { href: "/organization", label: "Organization", icon: Building2 },
-  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {

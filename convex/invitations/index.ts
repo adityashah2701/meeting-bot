@@ -91,7 +91,6 @@ export const listMine = query({
           isInactive: meeting.status === "ended" || status === "expired",
           canJoin: meeting.status === "active" && status !== "declined" && status !== "expired",
           joinLink: `/meeting/${invite.meetingId}`,
-          detailLink: `/invitations?invite=${invite._id}`,
           calendarLinks: meeting.scheduledFor
             ? {
                 google: `/api/invitations/${invite._id}/calendar?provider=google`,
