@@ -8,6 +8,7 @@ import {
   Plug,
   Bot,
   ChevronRight,
+  CreditCard,
 } from "lucide-react";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
   { href: "/integrations", label: "Integrations", icon: Plug },
+  { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {

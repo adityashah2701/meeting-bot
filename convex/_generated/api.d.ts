@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as billing_index from "../billing/index.js";
 import type * as dashboard_index from "../dashboard/index.js";
 import type * as http from "../http.js";
 import type * as insights_index from "../insights/index.js";
@@ -38,6 +39,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "billing/index": typeof billing_index;
   "dashboard/index": typeof dashboard_index;
   http: typeof http;
   "insights/index": typeof insights_index;

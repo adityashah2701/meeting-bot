@@ -255,6 +255,17 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+    const billing: {
+      maxMeetings: number | null;
+      features: {
+        googleCalendarSync: boolean;
+      };
+      usage: {
+        meetingsLimitReached: boolean;
+      };
+    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
+      orgId: args.orgId,
+    });
     const now = Date.now();
     const isScheduled =
       typeof args.scheduledFor === "number" && args.scheduledFor > now;
@@ -272,6 +283,18 @@ export const create = mutation({
 
     if (args.syncWithGoogleCalendar && !isScheduled) {
       throw new Error("Google Calendar sync is only available for scheduled meetings");
+    }
+
+    if (billing.usage.meetingsLimitReached) {
+      throw new Error(
+        billing.maxMeetings === null
+          ? "This workspace cannot create more meetings right now."
+          : `This workspace has reached its ${billing.maxMeetings}-meeting limit. Upgrade the plan to create more meetings.`,
+      );
+    }
+
+    if (shouldSyncWithGoogleCalendar && !billing.features.googleCalendarSync) {
+      throw new Error("Google Calendar sync is only available on paid workspace plans");
     }
 
     if (shouldSyncWithGoogleCalendar) {
@@ -965,7 +988,19 @@ export const saveSummary = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
-    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const billing: {
+      features: {
+        aiSummary: boolean;
+      };
+    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
+      orgId: meeting.orgId,
+    });
+
+    if (!billing.features.aiSummary) {
+      throw new Error("AI summaries are only available on paid workspace plans");
+    }
+
     const existing = await ctx.db
       .query("meeting_assets")
       .withIndex("by_meetingId_and_type", (q) =>

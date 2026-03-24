@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
+import { billingService } from "@/features/billing/services/billing-service";
 import {
   createInstantMeeting,
   meetingService,
@@ -44,7 +46,12 @@ export function CreateMeetingDialog({
 }) {
   const router = useRouter();
   const { organization } = useOrganization();
+  useSyncOrganizationBilling(organization?.id);
   const createMeeting = useMutation(meetingService.createMeeting);
+  const billing = useQuery(
+    billingService.getOrganizationPlan,
+    organization?.id ? { orgId: organization.id } : "skip",
+  );
   const googleCalendarConnection = useQuery(
     integrationsService.getGoogleCalendarConnection,
     organization?.id ? { orgId: organization.id } : "skip",
@@ -53,6 +60,8 @@ export function CreateMeetingDialog({
   const [activeTab, setActiveTab] = useState("instant");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [inviteEmailsText, setInviteEmailsText] = useState("");
+  const meetingLimitReached = billing?.usage.meetingsLimitReached ?? false;
+  const upgradeHref = "/billing";
 
   const requireOrganization = () => {
     if (!organization?.id) {
@@ -78,6 +87,9 @@ export function CreateMeetingDialog({
 
     setIsSubmitting(true);
     try {
+      if (meetingLimitReached) {
+        throw new Error("This workspace has reached its meeting limit. Upgrade the plan to create more meetings.");
+      }
       const meetingId = await createInstantMeeting(createMeeting, {
         orgId,
         title: values.title,
@@ -113,6 +125,9 @@ export function CreateMeetingDialog({
 
     setIsSubmitting(true);
     try {
+      if (meetingLimitReached) {
+        throw new Error("This workspace has reached its meeting limit. Upgrade the plan to create more meetings.");
+      }
       const scheduledFor = getLocalDateTimeTimestamp(values.date, values.time);
       const scheduledEndsAt = getLocalDateTimeTimestamp(
         values.date,
@@ -152,13 +167,29 @@ export function CreateMeetingDialog({
       <DialogTrigger asChild>
         <Button variant={triggerVariant}>{triggerLabel}</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="text-xl">Create Meeting</DialogTitle>
           <DialogDescription>
             Start instantly or schedule for later.
           </DialogDescription>
         </DialogHeader>
+
+        {meetingLimitReached && billing ? (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-medium text-foreground">Meeting limit reached</p>
+                <p className="text-xs text-muted-foreground">
+                  {billing.usage.meetingsUsed}/{billing.maxMeetings} meetings used in this workspace.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" asChild>
+                <a href={upgradeHref}>Upgrade</a>
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <Tabs
           className="gap-4"
@@ -182,8 +213,10 @@ export function CreateMeetingDialog({
               connectGoogleCalendarHref={connectGoogleCalendarHref}
               googleCalendarAccountEmail={googleCalendarConnection?.accountEmail}
               googleCalendarConnected={googleCalendarConnection?.connected === true}
+              googleCalendarFeatureEnabled={billing?.features.googleCalendarSync ?? false}
               isSubmitting={isSubmitting && activeTab === "schedule"}
               onSubmit={handleScheduleSubmit}
+              upgradeHref={upgradeHref}
             />
           </TabsContent>
         </Tabs>

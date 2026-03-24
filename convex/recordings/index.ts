@@ -2,6 +2,7 @@ import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { api } from "../_generated/api";
 import { assertMeetingAccess, requireIdentity } from "../lib/auth";
 import { getMeetingParticipant } from "../lib/meetinghelpers";
 import { hasMeetingPermission } from "../lib/meetingPermissions";
@@ -38,7 +39,19 @@ export const generateUploadUrl = mutation({
     meetingId: v.id("meetings"),
   },
   handler: async (ctx, args) => {
-    await requireRecordingPermission(ctx, args.meetingId);
+    const { meeting } = await requireRecordingPermission(ctx, args.meetingId);
+    const billing: {
+      features: {
+        recording: boolean;
+      };
+    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
+      orgId: meeting.orgId,
+    });
+
+    if (!billing.features.recording) {
+      throw new Error("Recordings are only available on paid workspace plans");
+    }
+
     return await ctx.storage.generateUploadUrl();
   },
 });
@@ -53,6 +66,17 @@ export const start = mutation({
       ctx,
       args.meetingId,
     );
+    const billing: {
+      features: {
+        recording: boolean;
+      };
+    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
+      orgId: meeting.orgId,
+    });
+
+    if (!billing.features.recording) {
+      throw new Error("Recordings are only available on paid workspace plans");
+    }
 
     const active = await ctx.db
       .query("meeting_recordings")

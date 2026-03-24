@@ -1755,6 +1755,17 @@ export const exportMeetingToNotion = action({
     } = await ctx.runQuery(api.meetings.index.get, {
       meetingId: args.meetingId,
     });
+    const billing: {
+      features: {
+        notionExport: boolean;
+      };
+    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
+      orgId: meeting.orgId,
+    });
+
+    if (!billing.features.notionExport) {
+      throw new Error("Notion export is only available on paid workspace plans");
+    }
 
     const connection = await ctx.runQuery(
       internal.integrations.index.getNotionConnectionForExport,

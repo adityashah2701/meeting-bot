@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
+import { billingService } from "@/features/billing/services/billing-service";
 import { meetingService } from "@/features/meeting/services/meeting-service";
 import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video, BookText, ExternalLink, ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -50,8 +52,13 @@ function getSyncedTranscriptLine(
 
 export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
+  useSyncOrganizationBilling(meeting?.orgId);
   const transcripts = useQuery(meetingService.listTranscripts, { meetingId });
   const recordings = useQuery(meetingService.listRecordings, { meetingId });
+  const billing = useQuery(
+    billingService.getOrganizationPlan,
+    meeting?.orgId ? { orgId: meeting.orgId } : "skip",
+  );
   const notionConnection = useQuery(
     meetingService.getNotionConnection,
     meeting?.orgId ? { orgId: meeting.orgId } : "skip",
@@ -79,7 +86,10 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
     ? getSyncedTranscriptLine(transcripts, activeRecording.startedAt, activeRecordingTime)
     : null;
   const canExportToNotion = Boolean(
-    notionConnection?.connected && notionConnection.targetPageId && !isExportingToNotion,
+    billing?.features.notionExport
+    && notionConnection?.connected
+    && notionConnection.targetPageId
+    && !isExportingToNotion,
   );
 
   const statusColor =
@@ -229,6 +239,11 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                 Integrations
               </a>
               .
+            </p>
+          )}
+          {billing && !billing.features.notionExport && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Notion export is available on paid workspace plans.
             </p>
           )}
           {notionExport?.lastError && (

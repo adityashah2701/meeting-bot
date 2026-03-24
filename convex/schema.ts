@@ -43,6 +43,26 @@ export default defineSchema({
     .index("by_clerkId", ["clerkId"])
     .index("by_slug", ["slug"]),
 
+  organization_billing_snapshots: defineTable({
+    orgId: v.string(),
+    planKey: v.union(
+      v.literal("starter"),
+      v.literal("custom"),
+      v.literal("pro"),
+    ),
+    planName: v.string(),
+    maxMeetings: v.union(v.number(), v.null()),
+    features: v.object({
+      unlimitedMeetings: v.boolean(),
+      aiSummary: v.boolean(),
+      notionExport: v.boolean(),
+      recording: v.boolean(),
+      googleCalendarSync: v.boolean(),
+    }),
+    syncedAt: v.number(),
+    updatedByTokenIdentifier: v.string(),
+  }).index("by_orgId", ["orgId"]),
+
   meetings: defineTable({
     orgId: v.string(),
     title: v.string(),

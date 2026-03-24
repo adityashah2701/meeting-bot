@@ -11,8 +11,10 @@ export function MeetingFormSchedule({
   onSubmit,
   isSubmitting,
   googleCalendarConnected,
+  googleCalendarFeatureEnabled = true,
   googleCalendarAccountEmail,
   connectGoogleCalendarHref,
+  upgradeHref = "/billing",
 }: {
   onSubmit: (values: {
     title: string;
@@ -26,8 +28,10 @@ export function MeetingFormSchedule({
   }) => Promise<void>;
   isSubmitting: boolean;
   googleCalendarConnected: boolean;
+  googleCalendarFeatureEnabled?: boolean;
   googleCalendarAccountEmail?: string;
   connectGoogleCalendarHref?: string;
+  upgradeHref?: string;
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -203,10 +207,15 @@ export function MeetingFormSchedule({
                 ? `Connected as ${googleCalendarAccountEmail ?? "your Google account"}`
                 : "Connect Google Calendar first to enable one-click scheduling sync."}
             </p>
+            {!googleCalendarFeatureEnabled ? (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                This workspace plan does not include Google Calendar sync. Upgrade to unlock it.
+              </p>
+            ) : null}
           </div>
           <Switch
             checked={syncWithGoogleCalendar}
-            disabled={!googleCalendarConnected}
+            disabled={!googleCalendarConnected || !googleCalendarFeatureEnabled}
             onCheckedChange={setSyncWithGoogleCalendar}
           />
         </div>
@@ -215,6 +224,14 @@ export function MeetingFormSchedule({
           <div className="mt-3">
             <Button asChild size="sm" variant="outline">
               <Link href={connectGoogleCalendarHref}>Connect Google Calendar</Link>
+            </Button>
+          </div>
+        ) : null}
+
+        {googleCalendarFeatureEnabled === false ? (
+          <div className="mt-3">
+            <Button asChild size="sm" variant="outline">
+              <Link href={upgradeHref}>Upgrade workspace</Link>
             </Button>
           </div>
         ) : null}

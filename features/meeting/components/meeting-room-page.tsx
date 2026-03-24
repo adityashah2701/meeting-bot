@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { LoadingBlock } from "@/components/shared/loading-block";
+import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
+import { billingService } from "@/features/billing/services/billing-service";
 import {
   Drawer,
   DrawerContent,
@@ -108,8 +110,13 @@ function getDefaultTranscriptionMode(): TranscriptionMode {
 export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const router = useRouter();
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
+  useSyncOrganizationBilling(meeting?.orgId);
   const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
   const recordings = useQuery(meetingService.listRecordings, { meetingId }) ?? [];
+  const billing = useQuery(
+    billingService.getOrganizationPlan,
+    meeting?.orgId ? { orgId: meeting.orgId } : "skip",
+  );
   const whiteboard = useQuery(meetingService.getWhiteboard, { meetingId });
   const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
   const saveSummary = useMutation(meetingService.saveSummary);
@@ -296,6 +303,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const canRecord = isJoined && Boolean(meeting.effectivePermissions?.canStartRecording);
   const activeRecording = recordings.find((recording) => recording.status === "recording") ?? null;
   const isRecordingActive = Boolean(activeRecording || isRecordingMedia);
+  const recordingLockedByPlan = billing?.features.recording === false;
   const canToggleAudio = isJoined && (!isAudioMuted || Boolean(meeting.effectivePermissions?.canUnmuteSelf));
   const canToggleVideo = isJoined && meeting.currentParticipant?.role !== "viewer";
   const canShareScreen = isJoined && Boolean(meeting.effectivePermissions?.canShareScreen);
@@ -755,7 +763,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                 variant="outline"
                 className="gap-1.5 rounded-full text-xs"
                 onClick={() => void handleStartRecording()}
-                disabled={isUploadingRecording}
+                disabled={isUploadingRecording || recordingLockedByPlan}
+                title={
+                  recordingLockedByPlan
+                    ? "Recordings are available on paid workspace plans"
+                    : undefined
+                }
               >
                 <CircleDot className="h-3.5 w-3.5 text-red-500" />
                 <span className="hidden sm:inline">Start Rec</span>

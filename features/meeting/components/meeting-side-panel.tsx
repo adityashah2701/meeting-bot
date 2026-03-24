@@ -49,6 +49,8 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
+import { billingService } from "@/features/billing/services/billing-service";
 import {
   meetingService,
   summarizeTranscript,
@@ -144,6 +146,7 @@ export function MeetingSidePanel({
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
 }) {
+  useSyncOrganizationBilling(orgId);
   const sendMessage = useMutation(meetingService.sendMessage);
   const saveSummary = useMutation(meetingService.saveSummary);
   const createTasksFromSummary = useMutation(meetingService.createTasksFromSummary);
@@ -157,6 +160,10 @@ export function MeetingSidePanel({
   const inviteParticipants = useMutation(meetingService.inviteParticipants);
   const resendInvite = useMutation(meetingService.resendInvite);
   const cancelInvite = useMutation(meetingService.cancelInvite);
+  const billing = useQuery(
+    billingService.getOrganizationPlan,
+    orgId ? { orgId } : "skip",
+  );
 
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const participants = useQuery(
@@ -361,7 +368,7 @@ export function MeetingSidePanel({
         <TabsContent value="ai" className="mt-0 flex min-h-0 flex-1 flex-col gap-3 p-4">
           <Button
             onClick={() => void handleGenerateSummary()}
-            disabled={isSummarizing}
+            disabled={isSummarizing || billing?.features.aiSummary === false}
             className="w-full gap-2"
             variant={displaySummary ? "outline" : "default"}
           >
@@ -382,6 +389,12 @@ export function MeetingSidePanel({
               </>
             )}
           </Button>
+
+          {billing?.features.aiSummary === false ? (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              AI summaries are available on paid workspace plans.
+            </p>
+          ) : null}
 
           <ScrollArea className="min-h-0 flex-1">
             {!displaySummary && !isSummarizing ? (

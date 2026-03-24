@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Plug,
+  CreditCard,
   Sparkles,
   X,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { AppSidebar } from "@/components/shared/app-sidebar";
 import { LoadingBlock } from "@/components/shared/loading-block";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { CreateMeetingDialog } from "@/features/meeting/components/create-meeting-dialog";
+import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -30,6 +32,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
   { href: "/integrations", label: "Integrations", icon: Plug },
+  { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
 function MobileNavLinks({ onNavigate }: { onNavigate?: () => void }) {
@@ -190,6 +193,7 @@ function DashboardHeader() {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isLoaded, organization } = useOrganization();
+  useSyncOrganizationBilling(organization?.id);
 
   useEffect(() => {
     if (isLoaded && !organization) {
