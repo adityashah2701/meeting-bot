@@ -304,6 +304,46 @@ export default defineSchema({
     .index("by_userTokenIdentifier_and_provider", ["userTokenIdentifier", "provider"])
     .index("by_provider_and_accountEmail", ["provider", "accountEmail"]),
 
+  notion_integrations: defineTable({
+    userTokenIdentifier: v.string(),
+    orgId: v.string(),
+    workspaceId: v.optional(v.string()),
+    workspaceName: v.optional(v.string()),
+    workspaceIcon: v.optional(v.string()),
+    botId: v.string(),
+    accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    tokenType: v.optional(v.string()),
+    duplicatedTemplateId: v.optional(v.string()),
+    targetPageId: v.optional(v.string()),
+    status: v.union(
+      v.literal("connected"),
+      v.literal("error"),
+      v.literal("revoked"),
+    ),
+    lastError: v.optional(v.string()),
+    connectedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userTokenIdentifier_and_orgId", ["userTokenIdentifier", "orgId"])
+    .index("by_orgId", ["orgId"]),
+
+  meeting_exports: defineTable({
+    meetingId: v.id("meetings"),
+    provider: v.literal("notion"),
+    externalId: v.optional(v.string()),
+    externalUrl: v.optional(v.string()),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("exported"),
+      v.literal("failed"),
+    ),
+    lastError: v.optional(v.string()),
+    exportedByTokenIdentifier: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_meetingId_and_provider", ["meetingId", "provider"]),
+
   summary_chunks: defineTable({
     meetingId: v.id("meetings"),
     chunkIndex: v.number(),

@@ -21,6 +21,12 @@ const defaultIntegrations = [
     category: "Communication",
     description: "Share summaries and action items in Slack.",
   },
+  {
+    key: "notion",
+    name: "Notion",
+    category: "Knowledge",
+    description: "Export meeting summaries, action items, and transcripts into Notion.",
+  },
 ] as const;
 
 export const ensureIntegrations = mutation({

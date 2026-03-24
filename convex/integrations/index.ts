@@ -1,14 +1,15 @@
 import { v } from "convex/values";
 import {
+  action,
   internalAction,
   internalMutation,
   internalQuery,
   mutation,
   query,
 } from "../_generated/server";
-import { internal } from "../_generated/api";
+import { api, internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import { assertOrgAccess, requireIdentity } from "../lib/auth";
+import { assertMeetingAccess, assertOrgAccess, requireIdentity } from "../lib/auth";
 import { normalizeInviteEmail, resolveInviteStatus } from "../lib/invitations";
 import {
   formatCalendarDateTimeInTimeZone,
@@ -20,6 +21,7 @@ import {
 } from "../../lib/public-app-url";
 
 const GOOGLE_PROVIDER = "google_calendar" as const;
+const NOTION_PROVIDER = "notion" as const;
 const GOOGLE_SYNC_STATUS_VALIDATOR = v.union(
   v.literal("pending"),
   v.literal("synced"),
@@ -30,12 +32,55 @@ const GOOGLE_CONNECTION_STATUS_VALIDATOR = v.union(
   v.literal("error"),
   v.literal("revoked"),
 );
+const NOTION_CONNECTION_STATUS_VALIDATOR = v.union(
+  v.literal("connected"),
+  v.literal("error"),
+  v.literal("revoked"),
+);
+const MEETING_EXPORT_STATUS_VALIDATOR = v.union(
+  v.literal("pending"),
+  v.literal("exported"),
+  v.literal("failed"),
+);
+const NOTION_VERSION = "2026-03-11";
+const NOTION_API_BASE_URL = "https://api.notion.com/v1";
+const NOTION_PAGE_TEXT_LIMIT = 1800;
+const NOTION_BLOCK_BATCH_SIZE = 100;
 
 type GoogleConnection = Doc<"user_integrations">;
+type NotionConnection = Doc<"notion_integrations">;
+type NotionExportConnection = NotionConnection & { targetPageId: string };
 type GoogleCalendarSyncContext = {
   meeting: Doc<"meetings">;
   connection: GoogleConnection | null;
   attendeeEmails: string[];
+};
+type NotionRichText = {
+  type: "text";
+  text: {
+    content: string;
+    link?: {
+      url: string;
+    };
+  };
+};
+type NotionBlock = {
+  object: "block";
+  type:
+    | "heading_1"
+    | "heading_2"
+    | "paragraph"
+    | "bulleted_list_item"
+    | "to_do";
+  heading_1?: { rich_text: NotionRichText[] };
+  heading_2?: { rich_text: NotionRichText[] };
+  paragraph?: { rich_text: NotionRichText[] };
+  bulleted_list_item?: { rich_text: NotionRichText[] };
+  to_do?: { rich_text: NotionRichText[]; checked: boolean };
+};
+type NotionPageCreateResponse = {
+  id: string;
+  url?: string;
 };
 
 function formatLogTimestamp(timestamp?: number | null) {
@@ -93,6 +138,385 @@ function buildGoogleEventDescription(
   ].filter((value): value is string => Boolean(value));
 
   return sections.join("\n\n");
+}
+
+function isNotionAuthError(message?: string, status?: number) {
+  if (status === 401) {
+    return true;
+  }
+
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("unauthorized") ||
+    normalized.includes("access token") ||
+    normalized.includes("refresh token") ||
+    normalized.includes("invalid_grant")
+  );
+}
+
+function normalizeNotionPageId(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const decoded = decodeURIComponent(trimmed);
+  const match = decoded.match(
+    /([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/,
+  );
+
+  if (!match) {
+    throw new Error("Enter a valid Notion page URL or page ID");
+  }
+
+  const compact = match[1].replace(/-/g, "").toLowerCase();
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
+}
+
+function chunkText(value: string, maxLength = NOTION_PAGE_TEXT_LIMIT) {
+  const text = value.trim();
+  if (!text) {
+    return [];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLength) {
+    const candidate = remaining.slice(0, maxLength);
+    const splitIndex = Math.max(
+      candidate.lastIndexOf("\n"),
+      candidate.lastIndexOf(" "),
+    );
+    const boundary = splitIndex > maxLength * 0.5 ? splitIndex : maxLength;
+    chunks.push(remaining.slice(0, boundary).trim());
+    remaining = remaining.slice(boundary).trim();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
+}
+
+function createRichText(content: string, link?: string): NotionRichText[] {
+  if (!content.trim()) {
+    return [];
+  }
+
+  return [
+    {
+      type: "text",
+      text: {
+        content,
+        ...(link ? { link: { url: link } } : {}),
+      },
+    },
+  ];
+}
+
+function createTextBlocks(
+  type: "paragraph" | "bulleted_list_item" | "to_do",
+  value: string,
+  options?: {
+    link?: string;
+    checked?: boolean;
+  },
+) {
+  return chunkText(value).map<NotionBlock>((chunk) => {
+    const richText = createRichText(chunk, options?.link);
+    if (type === "paragraph") {
+      return {
+        object: "block",
+        type,
+        paragraph: { rich_text: richText },
+      };
+    }
+
+    if (type === "bulleted_list_item") {
+      return {
+        object: "block",
+        type,
+        bulleted_list_item: { rich_text: richText },
+      };
+    }
+
+    return {
+      object: "block",
+      type,
+      to_do: {
+        rich_text: richText,
+        checked: options?.checked ?? false,
+      },
+    };
+  });
+}
+
+function createHeadingBlock(level: "heading_1" | "heading_2", value: string): NotionBlock {
+  const richText = createRichText(value.slice(0, NOTION_PAGE_TEXT_LIMIT));
+  if (level === "heading_1") {
+    return {
+      object: "block",
+      type: level,
+      heading_1: { rich_text: richText },
+    };
+  }
+
+  return {
+    object: "block",
+    type: level,
+    heading_2: { rich_text: richText },
+  };
+}
+
+function createSectionBlocks(
+  title: string,
+  body: NotionBlock[],
+) {
+  if (body.length === 0) {
+    return [];
+  }
+
+  return [createHeadingBlock("heading_2", title), ...body];
+}
+
+function formatMeetingTimestamp(
+  timestamp?: number,
+  timeZone?: string,
+) {
+  if (typeof timestamp !== "number") {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(timestamp);
+}
+
+function buildNotionMeetingBlocks(args: {
+  meeting: {
+    _id: Id<"meetings">;
+    title: string;
+    purpose: string;
+    description?: string;
+    status: "scheduled" | "active" | "ended";
+    orgId: string;
+    scheduledFor?: number;
+    scheduledEndsAt?: number;
+    scheduledTimeZone?: string;
+    summary: string | null;
+    key_points: string[];
+    decisions: string[];
+    action_items: Array<{ task: string; assignee?: string | null; due?: string | null }>;
+  };
+  transcripts: Array<{ speakerName: string; text: string; timestamp: number }>;
+  recordings: Array<{ playbackUrl?: string | null; startedAt: number; status: string }>;
+}) {
+  const joinUrl = getMeetingJoinUrl(args.meeting._id);
+  const detailUrl = buildPublicAppUrl(`/meeting/${args.meeting._id}/details`);
+  const blocks: NotionBlock[] = [
+    createHeadingBlock("heading_1", args.meeting.title),
+    ...createTextBlocks("paragraph", `Status: ${args.meeting.status}`),
+  ];
+
+  const scheduledLabel = formatMeetingTimestamp(
+    args.meeting.scheduledFor,
+    args.meeting.scheduledTimeZone,
+  );
+  if (scheduledLabel) {
+    blocks.push(...createTextBlocks("paragraph", `Scheduled for: ${scheduledLabel}`));
+  }
+  if (args.meeting.purpose) {
+    blocks.push(...createTextBlocks("paragraph", `Purpose: ${args.meeting.purpose}`));
+  }
+  if (args.meeting.description) {
+    blocks.push(...createTextBlocks("paragraph", `Notes: ${args.meeting.description}`));
+  }
+  if (joinUrl) {
+    blocks.push(...createTextBlocks("paragraph", "Join meeting", { link: joinUrl }));
+  }
+  if (detailUrl) {
+    blocks.push(...createTextBlocks("paragraph", "Open meeting details in Meeting Bot", { link: detailUrl }));
+  }
+
+  blocks.push(
+    ...createSectionBlocks(
+      "Summary",
+      args.meeting.summary
+        ? createTextBlocks("paragraph", args.meeting.summary)
+        : createTextBlocks("paragraph", "Summary not generated yet."),
+    ),
+  );
+
+  blocks.push(
+    ...createSectionBlocks(
+      "Key Points",
+      args.meeting.key_points.flatMap((point) => createTextBlocks("bulleted_list_item", point)),
+    ),
+  );
+
+  blocks.push(
+    ...createSectionBlocks(
+      "Decisions",
+      args.meeting.decisions.flatMap((decision) =>
+        createTextBlocks("bulleted_list_item", decision)
+      ),
+    ),
+  );
+
+  blocks.push(
+    ...createSectionBlocks(
+      "Action Items",
+      args.meeting.action_items.flatMap((item) => {
+        const parts = [item.task];
+        if (item.assignee) {
+          parts.push(`Assignee: ${item.assignee}`);
+        }
+        if (item.due) {
+          parts.push(`Due: ${item.due}`);
+        }
+        return createTextBlocks("to_do", parts.join(" | "));
+      }),
+    ),
+  );
+
+  const recordingBlocks = args.recordings.flatMap((recording, index) => {
+    const startedLabel = formatMeetingTimestamp(recording.startedAt);
+    const label = startedLabel
+      ? `Recording ${index + 1} (${startedLabel})`
+      : `Recording ${index + 1}`;
+    if (!recording.playbackUrl) {
+      return createTextBlocks("bulleted_list_item", `${label} - ${recording.status}`);
+    }
+    return createTextBlocks("bulleted_list_item", label, {
+      link: recording.playbackUrl,
+    });
+  });
+
+  blocks.push(...createSectionBlocks("Recordings", recordingBlocks));
+
+  const transcriptBlocks = args.transcripts.flatMap((line) =>
+    createTextBlocks(
+      "paragraph",
+      `${line.speakerName} (${formatMeetingTimestamp(line.timestamp) ?? "Unknown time"}): ${line.text}`,
+    ),
+  );
+  blocks.push(...createSectionBlocks("Transcript", transcriptBlocks));
+
+  return blocks;
+}
+
+type NotionApiRequestOptions = {
+  method: "GET" | "POST" | "PATCH";
+  path: string;
+  accessToken: string;
+  body?: Record<string, unknown>;
+};
+
+async function notionApiRequest<T>({
+  method,
+  path,
+  accessToken,
+  body,
+}: NotionApiRequestOptions): Promise<T> {
+  const response = await fetch(`${NOTION_API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "Notion-Version": NOTION_VERSION,
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | (T & { message?: string; code?: string })
+    | { message?: string; code?: string }
+    | null;
+
+  if (!response.ok) {
+    const error = new Error(
+      payload && "message" in payload && payload.message
+        ? payload.message
+        : "Notion request failed",
+    ) as Error & {
+      status?: number;
+      code?: string;
+    };
+    error.status = response.status;
+    error.code = payload && "code" in payload ? payload.code : undefined;
+    throw error;
+  }
+
+  return payload as T;
+}
+
+async function exchangeNotionRefreshToken(connection: NotionConnection) {
+  const clientId = process.env.NOTION_CLIENT_ID;
+  const clientSecret = process.env.NOTION_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error("Notion environment variables are not configured");
+  }
+
+  if (!connection.refreshToken) {
+    throw new Error("Notion refresh token is missing");
+  }
+
+  const response = await fetch(`${NOTION_API_BASE_URL}/oauth/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: connection.refreshToken,
+    }),
+  });
+
+  const payload = (await response.json()) as
+    | {
+        access_token?: string;
+        refresh_token?: string;
+        bot_id?: string;
+        workspace_name?: string | null;
+        workspace_icon?: string | null;
+        workspace_id?: string | null;
+        duplicated_template_id?: string | null;
+        token_type?: string;
+      }
+    | {
+        error?: string;
+        error_description?: string;
+      };
+
+  if (!response.ok || !("access_token" in payload) || !payload.access_token) {
+    throw new Error(
+      "error_description" in payload && payload.error_description
+        ? payload.error_description
+        : "Unable to refresh Notion access token",
+    );
+  }
+
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token ?? connection.refreshToken,
+    botId: payload.bot_id ?? connection.botId,
+    workspaceName: payload.workspace_name ?? connection.workspaceName,
+    workspaceIcon: payload.workspace_icon ?? connection.workspaceIcon,
+    workspaceId: payload.workspace_id ?? connection.workspaceId,
+    duplicatedTemplateId:
+      payload.duplicated_template_id ?? connection.duplicatedTemplateId,
+    tokenType: payload.token_type ?? connection.tokenType,
+  };
 }
 
 async function exchangeGoogleRefreshToken(connection: GoogleConnection) {
@@ -298,6 +722,558 @@ export const disconnectGoogleCalendar = mutation({
 
     await ctx.db.delete(existing._id);
     return { disconnected: true } as const;
+  },
+});
+
+export const getNotionConnection = query({
+  args: {
+    orgId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+
+    const connection = await ctx.db
+      .query("notion_integrations")
+      .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+        q
+          .eq("userTokenIdentifier", identity.tokenIdentifier)
+          .eq("orgId", args.orgId),
+      )
+      .unique();
+
+    if (!connection || connection.status === "revoked") {
+      return {
+        connected: false,
+        provider: NOTION_PROVIDER,
+        hasNotionClientId: Boolean(process.env.NOTION_CLIENT_ID),
+        hasNotionClientSecret: Boolean(process.env.NOTION_CLIENT_SECRET),
+        publicAppUrlConfigured: Boolean(getPublicAppUrl()),
+        publicAppUrl: getPublicAppUrl() ?? undefined,
+      } as const;
+    }
+
+    const hasAuthError = connection.status === "error" && isNotionAuthError(connection.lastError);
+    const warning =
+      connection.lastError && !hasAuthError ? connection.lastError : undefined;
+
+    return {
+      connected: connection.status === "connected" && !hasAuthError,
+      provider: NOTION_PROVIDER,
+      workspaceId: connection.workspaceId,
+      workspaceName: connection.workspaceName,
+      workspaceIcon: connection.workspaceIcon,
+      botId: connection.botId,
+      targetPageId: connection.targetPageId,
+      status: connection.status,
+      connectedAt: connection.connectedAt,
+      updatedAt: connection.updatedAt,
+      lastError: hasAuthError ? connection.lastError : undefined,
+      warning,
+      hasRefreshToken: Boolean(connection.refreshToken),
+      hasNotionClientId: Boolean(process.env.NOTION_CLIENT_ID),
+      hasNotionClientSecret: Boolean(process.env.NOTION_CLIENT_SECRET),
+      publicAppUrlConfigured: Boolean(getPublicAppUrl()),
+      publicAppUrl: getPublicAppUrl() ?? undefined,
+    } as const;
+  },
+});
+
+export const connectNotion = mutation({
+  args: {
+    orgId: v.string(),
+    workspaceId: v.optional(v.string()),
+    workspaceName: v.optional(v.string()),
+    workspaceIcon: v.optional(v.string()),
+    botId: v.string(),
+    accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    tokenType: v.optional(v.string()),
+    duplicatedTemplateId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+
+    const existing = await ctx.db
+      .query("notion_integrations")
+      .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+        q
+          .eq("userTokenIdentifier", identity.tokenIdentifier)
+          .eq("orgId", args.orgId),
+      )
+      .unique();
+
+    const now = Date.now();
+    const payload = {
+      userTokenIdentifier: identity.tokenIdentifier,
+      orgId: args.orgId,
+      workspaceId: args.workspaceId,
+      workspaceName: args.workspaceName,
+      workspaceIcon: args.workspaceIcon,
+      botId: args.botId,
+      accessToken: args.accessToken,
+      refreshToken: args.refreshToken ?? existing?.refreshToken,
+      tokenType: args.tokenType,
+      duplicatedTemplateId: args.duplicatedTemplateId,
+      targetPageId: existing?.targetPageId,
+      status: "connected" as const,
+      lastError: undefined,
+      connectedAt: existing?.connectedAt ?? now,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+      return existing._id;
+    }
+
+    return await ctx.db.insert("notion_integrations", payload);
+  },
+});
+
+export const disconnectNotion = mutation({
+  args: {
+    orgId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+
+    const existing = await ctx.db
+      .query("notion_integrations")
+      .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+        q
+          .eq("userTokenIdentifier", identity.tokenIdentifier)
+          .eq("orgId", args.orgId),
+      )
+      .unique();
+
+    if (!existing) {
+      return { disconnected: false } as const;
+    }
+
+    await ctx.db.delete(existing._id);
+    return { disconnected: true } as const;
+  },
+});
+
+export const updateNotionTargetPage = mutation({
+  args: {
+    orgId: v.string(),
+    targetPageId: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+
+    const connection = await ctx.db
+      .query("notion_integrations")
+      .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+        q
+          .eq("userTokenIdentifier", identity.tokenIdentifier)
+          .eq("orgId", args.orgId),
+      )
+      .unique();
+
+    if (!connection) {
+      throw new Error("Connect Notion before saving an export destination");
+    }
+
+    const normalizedTargetPageId = args.targetPageId
+      ? normalizeNotionPageId(args.targetPageId) ?? undefined
+      : undefined;
+
+    await ctx.db.patch(connection._id, {
+      targetPageId: normalizedTargetPageId,
+      updatedAt: Date.now(),
+      lastError: undefined,
+      status: "connected",
+    });
+
+    return {
+      targetPageId: normalizedTargetPageId ?? null,
+    } as const;
+  },
+});
+
+export const getMeetingNotionExport = query({
+  args: {
+    meetingId: v.id("meetings"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+
+    return await ctx.db
+      .query("meeting_exports")
+      .withIndex("by_meetingId_and_provider", (q) =>
+        q.eq("meetingId", args.meetingId).eq("provider", NOTION_PROVIDER),
+      )
+      .unique();
+  },
+});
+
+export const getNotionConnectionForExport = internalQuery({
+  args: {
+    orgId: v.string(),
+    userTokenIdentifier: v.string(),
+  },
+  handler: async (ctx, args): Promise<NotionConnection | null> => {
+    return await ctx.db
+      .query("notion_integrations")
+      .withIndex("by_userTokenIdentifier_and_orgId", (q) =>
+        q
+          .eq("userTokenIdentifier", args.userTokenIdentifier)
+          .eq("orgId", args.orgId),
+      )
+      .unique();
+  },
+});
+
+export const updateNotionConnectionState = internalMutation({
+  args: {
+    connectionId: v.id("notion_integrations"),
+    accessToken: v.optional(v.string()),
+    refreshToken: v.optional(v.string()),
+    workspaceId: v.optional(v.string()),
+    workspaceName: v.optional(v.string()),
+    workspaceIcon: v.optional(v.string()),
+    botId: v.optional(v.string()),
+    tokenType: v.optional(v.string()),
+    duplicatedTemplateId: v.optional(v.string()),
+    targetPageId: v.optional(v.string()),
+    status: v.optional(NOTION_CONNECTION_STATUS_VALIDATOR),
+    lastError: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const patch: {
+      accessToken?: string;
+      refreshToken?: string;
+      workspaceId?: string;
+      workspaceName?: string;
+      workspaceIcon?: string;
+      botId?: string;
+      tokenType?: string;
+      duplicatedTemplateId?: string;
+      targetPageId?: string;
+      status?: "connected" | "error" | "revoked";
+      lastError?: string;
+      updatedAt: number;
+    } = {
+      updatedAt: Date.now(),
+    };
+
+    if (typeof args.accessToken === "string") {
+      patch.accessToken = args.accessToken;
+    }
+    if (typeof args.refreshToken === "string") {
+      patch.refreshToken = args.refreshToken;
+    }
+    if (typeof args.workspaceId === "string") {
+      patch.workspaceId = args.workspaceId;
+    }
+    if (typeof args.workspaceName === "string") {
+      patch.workspaceName = args.workspaceName;
+    }
+    if (typeof args.workspaceIcon === "string") {
+      patch.workspaceIcon = args.workspaceIcon;
+    }
+    if (typeof args.botId === "string") {
+      patch.botId = args.botId;
+    }
+    if (typeof args.tokenType === "string") {
+      patch.tokenType = args.tokenType;
+    }
+    if (typeof args.duplicatedTemplateId === "string") {
+      patch.duplicatedTemplateId = args.duplicatedTemplateId;
+    }
+    if (typeof args.targetPageId === "string") {
+      patch.targetPageId = args.targetPageId;
+    }
+    if (args.status) {
+      patch.status = args.status;
+    }
+    if (args.lastError !== undefined) {
+      patch.lastError = args.lastError ?? undefined;
+    }
+
+    await ctx.db.patch(args.connectionId, patch);
+  },
+});
+
+export const upsertMeetingExportState = internalMutation({
+  args: {
+    meetingId: v.id("meetings"),
+    provider: v.literal("notion"),
+    status: MEETING_EXPORT_STATUS_VALIDATOR,
+    exportedByTokenIdentifier: v.string(),
+    externalId: v.optional(v.string()),
+    externalUrl: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("meeting_exports")
+      .withIndex("by_meetingId_and_provider", (q) =>
+        q.eq("meetingId", args.meetingId).eq("provider", args.provider),
+      )
+      .unique();
+
+    const now = Date.now();
+    const payload = {
+      provider: args.provider,
+      status: args.status,
+      exportedByTokenIdentifier: args.exportedByTokenIdentifier,
+      externalId: args.externalId,
+      externalUrl: args.externalUrl,
+      lastError: args.lastError,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+      return existing._id;
+    }
+
+    return await ctx.db.insert("meeting_exports", {
+      meetingId: args.meetingId,
+      ...payload,
+      createdAt: now,
+    });
+  },
+});
+
+export const exportMeetingToNotion = action({
+  args: {
+    meetingId: v.id("meetings"),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ pageId: string; pageUrl: string | null }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthenticated");
+    }
+
+    const meeting: {
+      _id: Id<"meetings">;
+      title: string;
+      purpose: string;
+      description?: string;
+      status: "scheduled" | "active" | "ended";
+      orgId: string;
+      scheduledFor?: number;
+      scheduledEndsAt?: number;
+      scheduledTimeZone?: string;
+      summary: string | null;
+      key_points: string[];
+      decisions: string[];
+      action_items: Array<{ task: string; assignee?: string | null; due?: string | null }>;
+    } = await ctx.runQuery(api.meetings.index.get, {
+      meetingId: args.meetingId,
+    });
+
+    const connection = await ctx.runQuery(
+      internal.integrations.index.getNotionConnectionForExport,
+      {
+        orgId: meeting.orgId,
+        userTokenIdentifier: identity.tokenIdentifier,
+      },
+    );
+
+    if (!connection || connection.status === "revoked") {
+      throw new Error("Connect Notion before exporting this meeting");
+    }
+
+    if (!connection.targetPageId) {
+      throw new Error("Choose a Notion parent page before exporting");
+    }
+
+    const transcripts: Array<{ speakerName: string; text: string; timestamp: number }> =
+      await ctx.runQuery(api.transcripts.index.list, {
+      meetingId: args.meetingId,
+    });
+    const recordings: Array<{
+      playbackUrl?: string | null;
+      startedAt: number;
+      status: string;
+    }> = await ctx.runQuery(api.recordings.index.listByMeeting, {
+        meetingId: args.meetingId,
+      });
+
+    await ctx.runMutation(internal.integrations.index.upsertMeetingExportState, {
+      meetingId: args.meetingId,
+      provider: NOTION_PROVIDER,
+      status: "pending",
+      exportedByTokenIdentifier: identity.tokenIdentifier,
+    });
+
+    const blocks = buildNotionMeetingBlocks({
+      meeting,
+      transcripts,
+      recordings,
+    });
+
+    let activeConnection: NotionExportConnection = {
+      ...connection,
+      targetPageId: connection.targetPageId,
+    };
+
+    const createOrAppendPage = async (
+      currentConnection: NotionExportConnection,
+    ): Promise<NotionPageCreateResponse> => {
+      const [firstChunk, ...remainingChunks] = Array.from(
+        { length: Math.ceil(blocks.length / NOTION_BLOCK_BATCH_SIZE) },
+        (_, index) =>
+          blocks.slice(
+            index * NOTION_BLOCK_BATCH_SIZE,
+            (index + 1) * NOTION_BLOCK_BATCH_SIZE,
+          ),
+      ).filter((chunk) => chunk.length > 0);
+
+      const createdPage: NotionPageCreateResponse = await notionApiRequest<NotionPageCreateResponse>({
+        method: "POST",
+        path: "/pages",
+        accessToken: currentConnection.accessToken,
+        body: {
+          parent: {
+            page_id: currentConnection.targetPageId,
+          },
+          properties: {
+            title: {
+              title: createRichText(meeting.title.slice(0, NOTION_PAGE_TEXT_LIMIT)),
+            },
+          },
+          children: firstChunk,
+        },
+      });
+
+      for (const chunk of remainingChunks) {
+        await notionApiRequest({
+          method: "PATCH",
+          path: `/blocks/${createdPage.id}/children`,
+          accessToken: currentConnection.accessToken,
+          body: {
+            children: chunk,
+          },
+        });
+      }
+
+      return createdPage;
+    };
+
+    try {
+      const createdPage = await createOrAppendPage(activeConnection);
+      await ctx.runMutation(internal.integrations.index.upsertMeetingExportState, {
+        meetingId: args.meetingId,
+        provider: NOTION_PROVIDER,
+        status: "exported",
+        exportedByTokenIdentifier: identity.tokenIdentifier,
+        externalId: createdPage.id,
+        externalUrl: createdPage.url,
+      });
+      await ctx.runMutation(internal.integrations.index.updateNotionConnectionState, {
+        connectionId: activeConnection._id,
+        status: "connected",
+        lastError: undefined,
+      });
+
+      return {
+        pageId: createdPage.id,
+        pageUrl: createdPage.url ?? null,
+      } as const;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to export meeting to Notion";
+      const status =
+        error instanceof Error && "status" in error
+          ? (error as Error & { status?: number }).status
+          : undefined;
+
+      if (activeConnection.refreshToken && isNotionAuthError(message, status)) {
+        try {
+          const refreshed = await exchangeNotionRefreshToken(activeConnection);
+          await ctx.runMutation(internal.integrations.index.updateNotionConnectionState, {
+            connectionId: activeConnection._id,
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            workspaceId: refreshed.workspaceId ?? undefined,
+            workspaceName: refreshed.workspaceName ?? undefined,
+            workspaceIcon: refreshed.workspaceIcon ?? undefined,
+            botId: refreshed.botId,
+            tokenType: refreshed.tokenType ?? undefined,
+            duplicatedTemplateId: refreshed.duplicatedTemplateId ?? undefined,
+            status: "connected",
+            lastError: undefined,
+          });
+
+          activeConnection = {
+            ...activeConnection,
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            workspaceId: refreshed.workspaceId ?? activeConnection.workspaceId,
+            workspaceName: refreshed.workspaceName ?? activeConnection.workspaceName,
+            workspaceIcon: refreshed.workspaceIcon ?? activeConnection.workspaceIcon,
+            botId: refreshed.botId,
+            tokenType: refreshed.tokenType ?? activeConnection.tokenType,
+            duplicatedTemplateId:
+              refreshed.duplicatedTemplateId ?? activeConnection.duplicatedTemplateId,
+            status: "connected",
+            lastError: undefined,
+          };
+
+          const createdPage = await createOrAppendPage(activeConnection);
+          await ctx.runMutation(internal.integrations.index.upsertMeetingExportState, {
+            meetingId: args.meetingId,
+            provider: NOTION_PROVIDER,
+            status: "exported",
+            exportedByTokenIdentifier: identity.tokenIdentifier,
+            externalId: createdPage.id,
+            externalUrl: createdPage.url,
+          });
+
+          return {
+            pageId: createdPage.id,
+            pageUrl: createdPage.url ?? null,
+          } as const;
+        } catch (refreshError) {
+          const refreshMessage =
+            refreshError instanceof Error
+              ? refreshError.message
+              : "Unable to refresh Notion access token";
+
+          await ctx.runMutation(internal.integrations.index.updateNotionConnectionState, {
+            connectionId: activeConnection._id,
+            status: "error",
+            lastError: refreshMessage,
+          });
+          await ctx.runMutation(internal.integrations.index.upsertMeetingExportState, {
+            meetingId: args.meetingId,
+            provider: NOTION_PROVIDER,
+            status: "failed",
+            exportedByTokenIdentifier: identity.tokenIdentifier,
+            lastError: refreshMessage,
+          });
+          throw new Error(refreshMessage);
+        }
+      }
+
+      await ctx.runMutation(internal.integrations.index.updateNotionConnectionState, {
+        connectionId: activeConnection._id,
+        status: isNotionAuthError(message, status) ? "error" : activeConnection.status,
+        lastError: message,
+      });
+      await ctx.runMutation(internal.integrations.index.upsertMeetingExportState, {
+        meetingId: args.meetingId,
+        provider: NOTION_PROVIDER,
+        status: "failed",
+        exportedByTokenIdentifier: identity.tokenIdentifier,
+        lastError: message,
+      });
+      throw new Error(message);
+    }
   },
 });
 

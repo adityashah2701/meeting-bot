@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import ReactMarkdown from "react-markdown";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,13 +9,30 @@ import { LoadingBlock } from "@/components/shared/loading-block";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { meetingService } from "@/features/meeting/services/meeting-service";
-import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video } from "lucide-react";
+import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video, BookText, ExternalLink } from "lucide-react";
 import React, { useState } from "react";
+import { toast } from "sonner";
+
+type TranscriptRow = {
+  _id: string;
+  timestamp: number;
+  text: string;
+  speakerName: string;
+};
+
+type RecordingRow = {
+  _id: string;
+  startedAt: number;
+  durationMs?: number;
+  status: string;
+  playbackUrl?: string | null;
+};
 
 function getSyncedTranscriptLine(
-  transcriptRows: Array<{ timestamp: number; text: string; speakerName: string }>,
+  transcriptRows: TranscriptRow[],
   recordingStartedAt: number,
   currentTimeSeconds: number,
 ) {
@@ -33,8 +50,18 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   const transcripts = useQuery(meetingService.listTranscripts, { meetingId });
   const recordings = useQuery(meetingService.listRecordings, { meetingId });
+  const notionConnection = useQuery(
+    meetingService.getNotionConnection,
+    meeting?.orgId ? { orgId: meeting.orgId } : "skip",
+  );
+  const notionExport = useQuery(
+    meetingService.getMeetingNotionExport,
+    { meetingId },
+  );
+  const exportMeetingToNotion = useAction(meetingService.exportMeetingToNotion);
   const [activeRecordingId, setActiveRecordingId] = useState<string | null>(null);
   const [activeRecordingTime, setActiveRecordingTime] = useState(0);
+  const [isExportingToNotion, setIsExportingToNotion] = useState(false);
 
   if (meeting === undefined || transcripts === undefined || recordings === undefined) {
     return <LoadingBlock className="h-96 w-full" />;
@@ -45,10 +72,15 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
   }
 
   const creationDate = new Date(meeting._creationTime);
-  const activeRecording = recordings.find((recording) => recording._id === activeRecordingId) ?? null;
+  const activeRecording = recordings.find(
+    (recording: RecordingRow) => recording._id === activeRecordingId,
+  ) ?? null;
   const syncedTranscriptLine = activeRecording
     ? getSyncedTranscriptLine(transcripts, activeRecording.startedAt, activeRecordingTime)
     : null;
+  const canExportToNotion = Boolean(
+    notionConnection?.connected && notionConnection.targetPageId && !isExportingToNotion,
+  );
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
@@ -82,6 +114,22 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
               </span>
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={notionConnection?.connected ? "secondary" : "outline"} className="gap-1.5">
+              <BookText className="h-3.5 w-3.5" />
+              {notionConnection?.connected
+                ? notionConnection.targetPageId
+                  ? "Notion ready"
+                  : "Notion connected, destination missing"
+                : "Notion not connected"}
+            </Badge>
+            {notionExport?.status ? (
+              <Badge variant={notionExport.status === "exported" ? "default" : notionExport.status === "failed" ? "destructive" : "secondary"}>
+                {notionExport.status === "exported" ? "Exported to Notion" : notionExport.status === "failed" ? "Notion export failed" : "Export in progress"}
+              </Badge>
+            ) : null}
+          </div>
           
           <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl md:text-5xl">
             {meeting.title}
@@ -92,6 +140,59 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
               {meeting.purpose}
             </p>
           )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              disabled={!canExportToNotion}
+              onClick={async () => {
+                setIsExportingToNotion(true);
+                try {
+                  const result = await exportMeetingToNotion({ meetingId });
+                  toast.success("Meeting exported to Notion");
+                  if (result.pageUrl) {
+                    window.open(result.pageUrl, "_blank", "noopener,noreferrer");
+                  }
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : "Unable to export this meeting to Notion",
+                  );
+                } finally {
+                  setIsExportingToNotion(false);
+                }
+              }}
+            >
+              {isExportingToNotion ? "Exporting..." : "Export to Notion"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!notionExport?.externalUrl}
+              onClick={() => {
+                if (notionExport?.externalUrl) {
+                  window.open(notionExport.externalUrl, "_blank", "noopener,noreferrer");
+                }
+              }}
+            >
+              <ExternalLink className="mr-2 h-4 w-4" />
+              Open Notion Page
+            </Button>
+            {!notionConnection?.connected ? (
+              <p className="text-xs text-muted-foreground">
+                Connect Notion from Integrations before exporting this meeting.
+              </p>
+            ) : null}
+            {notionConnection?.connected && !notionConnection.targetPageId ? (
+              <p className="text-xs text-muted-foreground">
+                Choose a Notion parent page in Integrations before exporting.
+              </p>
+            ) : null}
+            {notionExport?.lastError ? (
+              <p className="text-xs text-destructive">
+                {notionExport.lastError}
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -118,7 +219,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                 />
               ) : (
                 <div className="flex flex-col pb-8 pt-4">
-                  {transcripts.map((line, idx) => {
+                  {transcripts.map((line: TranscriptRow, idx: number) => {
                     const previousLine = transcripts[idx - 1];
                     const isSameSpeaker = previousLine && previousLine.speakerName === line.speakerName;
                     
@@ -275,7 +376,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                 description="When hosts or co-hosts record this meeting, entries will appear here."
               />
             ) : (
-              recordings.map((recording) => (
+              recordings.map((recording: RecordingRow) => (
                 <div key={recording._id} className="space-y-2 rounded-lg border border-border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-foreground">

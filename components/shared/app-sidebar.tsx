@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, LayoutDashboard, CalendarDays, LineChart, CheckSquare, Sparkles, Plug } from "lucide-react";
+import { Menu, LayoutDashboard, CalendarDays, LineChart, CheckSquare, Sparkles, Plug, Bot } from "lucide-react";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,8 +54,8 @@ export function AppSidebar() {
       <aside className="hidden h-screen w-64 shrink-0 self-start border-r border-border bg-background lg:sticky lg:top-0 lg:flex lg:flex-col">
         <div className="border-b border-border px-4 py-4">
           <Link href="/dashboard" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center border border-border bg-foreground text-background">
-              <Sparkles className="h-4 w-4" />
+            <div className="flex h-9 w-9 items-center justify-center text-foreground">
+              <Bot className="h-7 w-7" />
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">Meeting Bot</p>
