@@ -17,6 +17,7 @@ export function VideoTile({
   isCameraEnabled = true,
   isScreenSharing = false,
   isPresentation = false,
+  avatarDensity = "default",
 }: {
   className?: string;
   stream: MediaStream | null;
@@ -31,6 +32,7 @@ export function VideoTile({
   isCameraEnabled?: boolean;
   isScreenSharing?: boolean;
   isPresentation?: boolean;
+  avatarDensity?: "default" | "compact" | "grid";
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -44,6 +46,16 @@ export function VideoTile({
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
+  const isCompactTile = avatarDensity === "compact";
+  const isGridTile = avatarDensity === "grid";
+  const avatarSizeClass = isCompactTile ? "size-8" : isGridTile ? "size-10 @xs:size-12 @sm:size-16" : "size-16";
+  const avatarRingClass = isCompactTile ? "p-px" : "p-1";
+  const avatarFallbackTextClass = isCompactTile ? "text-[10px]" : isGridTile ? "text-xs @sm:text-base" : "text-base";
+  const cameraOffBadgeClass = isCompactTile
+    ? "px-1.5 py-0.5 text-[8px]"
+    : isGridTile
+      ? "px-1.5 py-0.5 text-[9px] @sm:px-2.5 @sm:py-1 @sm:text-xs"
+      : "px-2.5 py-1 text-xs";
 
   useEffect(() => {
     const el = videoRef.current;
@@ -161,11 +173,12 @@ export function VideoTile({
   return (
     <div
       className={cn(
-        "relative flex h-full overflow-hidden bg-[#1a1a2e] shadow-lg transition-all duration-200",
+        "@container relative flex h-full transition-all duration-200",
         isSpeaking && "ring-2 ring-primary ring-offset-1 ring-offset-background",
         className,
       )}
     >
+    <div className="relative flex h-full w-full overflow-hidden bg-[#1a1a2e] shadow-lg rounded-[inherit]">
       {shouldRenderVideo ? (
         <video
           ref={videoRef}
@@ -183,18 +196,19 @@ export function VideoTile({
           <div className="flex flex-col items-center gap-3">
             <div
               className={cn(
-                "rounded-full p-1 transition-all duration-300",
+                "rounded-full transition-all duration-300",
+                avatarRingClass,
                 isSpeaking && "ring-2 ring-primary ring-offset-2 ring-offset-[#1a1a2e]",
               )}
             >
-              <Avatar className="size-16 shadow-md">
+              <Avatar className={cn(avatarSizeClass, "shadow-md")}>
                 <AvatarImage className="rounded-[100%]!" alt={name} src={imageUrl} />
-                <AvatarFallback className="bg-primary/20 text-base font-semibold text-primary">
+                <AvatarFallback className={cn("bg-primary/20 font-semibold text-primary", avatarFallbackTextClass)}>
                   {initials || "?"}
                 </AvatarFallback>
               </Avatar>
             </div>
-            <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-2.5 py-1 text-xs text-white/60 backdrop-blur">
+            <div className={cn("flex items-center gap-1.5 rounded-full bg-black/30 text-white/60 backdrop-blur", cameraOffBadgeClass)}>
               <VideoOff className="h-3 w-3" />
               <span>Camera off</span>
             </div>
@@ -215,6 +229,7 @@ export function VideoTile({
         </div>
       </div>
       <audio ref={audioRef} autoPlay hidden aria-hidden="true" />
+    </div>
     </div>
   );
 }

@@ -105,6 +105,7 @@ export function ParticipantGrid({
                 isMicEnabled={localParticipant.isMicEnabled}
                 isCameraEnabled={localParticipant.isCameraEnabled}
                 isScreenSharing={localParticipant.isScreenSharing}
+                avatarDensity="compact"
               />
             </AspectRatio>
           )}
@@ -118,6 +119,7 @@ export function ParticipantGrid({
                 isMicEnabled={screenSharer.isMicEnabled}
                 isCameraEnabled={screenSharer.isCameraEnabled}
                 isScreenSharing={screenSharer.isScreenSharing}
+                avatarDensity="compact"
               />
             </AspectRatio>
           )}
@@ -131,6 +133,7 @@ export function ParticipantGrid({
                 isMicEnabled={p.isMicEnabled}
                 isCameraEnabled={p.isCameraEnabled}
                 isScreenSharing={p.isScreenSharing}
+                avatarDensity="compact"
               />
             </AspectRatio>
           ))}
@@ -177,6 +180,7 @@ export function ParticipantGrid({
                     isMicEnabled={p.isMicEnabled}
                     isCameraEnabled={p.isCameraEnabled}
                     isScreenSharing={p.isScreenSharing}
+                    avatarDensity="compact"
                   />
                 </AspectRatio>
               </div>
@@ -223,6 +227,7 @@ export function ParticipantGrid({
                 isMicEnabled={p.isMicEnabled}
                 isCameraEnabled={p.isCameraEnabled}
                 isScreenSharing={p.isScreenSharing}
+                avatarDensity="compact"
               />
             </AspectRatio>
           ))}
@@ -251,6 +256,7 @@ export function ParticipantGrid({
                 isMicEnabled={p.isMicEnabled}
                 isCameraEnabled={p.isCameraEnabled}
                 isScreenSharing={p.isScreenSharing}
+                avatarDensity={count >= 3 ? "grid" : "default"}
               />
             </AspectRatio>
           </div>

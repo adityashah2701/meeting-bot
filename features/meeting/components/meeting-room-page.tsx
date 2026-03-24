@@ -134,6 +134,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const [transcriptDock, setTranscriptDock] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
   const [isRecordingMedia, setIsRecordingMedia] = useState(false);
   const [isUploadingRecording, setIsUploadingRecording] = useState(false);
+  const [isViewOptionsOpen, setIsViewOptionsOpen] = useState(false);
   const [isMeetingSettingsOpen, setIsMeetingSettingsOpen] = useState(false);
   const dbTranscript = useMemo(() => transcriptRows ?? [], [transcriptRows]);
   const transcriptQueueRef = useRef<Array<{ text: string; timestamp: number }>>([]);
@@ -806,7 +807,11 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
             </Button>
 
             {/* ── View Options Drawer ── */}
-            <Drawer direction="right">
+            <Drawer
+              direction="right"
+              open={isViewOptionsOpen}
+              onOpenChange={setIsViewOptionsOpen}
+            >
               <DrawerTrigger asChild>
                 <Button size="sm" variant="outline" className="gap-1.5 rounded-full text-xs">
                   <MoreHorizontal className="h-4 w-4" />
@@ -960,7 +965,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                   {/* Meeting Settings — only for hosts/co-hosts */}
                   {Boolean(meeting.effectivePermissions?.canChangeSettings) ? (
                     <button
-                      onClick={() => setIsMeetingSettingsOpen(true)}
+                      onClick={() => {
+                        setIsViewOptionsOpen(false);
+                        window.setTimeout(() => {
+                          setIsMeetingSettingsOpen(true);
+                        }, 0);
+                      }}
                       className="mt-2 flex w-full items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-muted"
                     >
                       <Settings2 className="h-4 w-4 text-muted-foreground" />

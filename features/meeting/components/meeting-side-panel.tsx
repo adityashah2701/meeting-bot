@@ -398,9 +398,9 @@ export function MeetingSidePanel({
               <div className="space-y-5 pr-2 text-sm">
                 {displaySummary ? (
                   <div>
-                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {/* <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Overview
-                    </p>
+                    </p> */}
                     <ReactMarkdown
                       components={{
                         h1: (props) => (
@@ -513,216 +513,6 @@ export function MeetingSidePanel({
               </p>
             </div>
           </div>
-
-          {/* Settings Dialog — controlled from parent More drawer */}
-          {canChangeSettings ? (
-            <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Meeting settings</DialogTitle>
-                    <DialogDescription>
-                      Control access, lobby behavior, and participant privileges.
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <Tabs defaultValue="settings" className="mt-2">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="settings">
-                        <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-                        Settings
-                      </TabsTrigger>
-                      <TabsTrigger value="invite">
-                        <UserCheck className="mr-1.5 h-3.5 w-3.5" />
-                        Invite
-                      </TabsTrigger>
-                    </TabsList>
-
-                    {/* ── Settings Tab ── */}
-                    <TabsContent value="settings" className="mt-4 space-y-5">
-                      {/* Join Mode */}
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          Join Mode
-                        </p>
-                        <Select
-                          value={settingsDraft.joinMode}
-                          onValueChange={(value) =>
-                            setSettingsDraft((current) => ({
-                              ...current,
-                              joinMode: value as MeetingJoinMode,
-                            }))
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="organization_only">Organization only</SelectItem>
-                            <SelectItem value="invite_only">Invite only</SelectItem>
-                            <SelectItem value="anyone_with_link">Anyone with link</SelectItem>
-                            <SelectItem value="ask_to_join">Ask to join</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Permission Toggles */}
-                      <div className="space-y-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          Permissions
-                        </p>
-                        <div className="rounded-lg border border-border divide-y divide-border">
-                          {[
-                            ["allowScreenShare", "Allow screen share"],
-                            ["allowWhiteboard", "Allow whiteboard"],
-                            ["allowChat", "Allow chat"],
-                            ["allowReactions", "Allow reactions"],
-                            ["allowRecording", "Allow recording"],
-                            ["allowParticipantsToUnmute", "Allow participants to unmute"],
-                            ["autoAdmitOrgUsers", "Auto-admit org users"],
-                            ["lobbyEnabled", "Enable lobby"],
-                          ].map(([field, label]) => (
-                            <div key={field} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                              <p className="text-sm text-foreground">{label}</p>
-                              <Switch
-                                checked={settingsDraft[field as keyof MeetingSettings] as boolean}
-                                onCheckedChange={(checked) =>
-                                  setSettingsDraft((current) => ({
-                                    ...current,
-                                    [field]: checked,
-                                  }))
-                                }
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Lock Meeting */}
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-                        <div className="flex items-center gap-2">
-                          {lockDraft ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
-                          <p className="text-sm text-foreground">Lock meeting</p>
-                        </div>
-                        <Switch checked={lockDraft} onCheckedChange={setLockDraft} />
-                      </div>
-                    </TabsContent>
-
-                    {/* ── Invite Tab ── */}
-                    <TabsContent value="invite" className="mt-4 space-y-4">
-                      <p className="text-xs text-muted-foreground">
-                        Add emails to invite participants to this meeting.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={inviteEmailsInput}
-                          onChange={(event) => setInviteEmailsInput(event.target.value)}
-                          placeholder="alex@company.com, sam@company.com"
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => void handleInviteParticipants()}
-                          disabled={isInviting}
-                        >
-                          {isInviting ? "Inviting..." : "Invite"}
-                        </Button>
-                      </div>
-
-                      <ScrollArea className="h-52 rounded-md border border-border/60 p-2">
-                        <div className="space-y-2">
-                          {meetingInvites.length === 0 ? (
-                            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-                              No invites yet.
-                            </p>
-                          ) : (
-                            meetingInvites.map((invite) => (
-                              <div
-                                key={invite._id}
-                                className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                              >
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-foreground">
-                                    {invite.email}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {roleLabel(invite.role)} · {inviteStatusLabel(invite.resolvedStatus)}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  {invite.resolvedStatus !== "accepted" && invite.resolvedStatus !== "cancelled" ? (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() =>
-                                          void handleParticipantMutation(
-                                            () =>
-                                              resendInvite({
-                                                meetingId,
-                                                inviteId: invite._id,
-                                              }),
-                                            "Invite resent",
-                                          )
-                                        }
-                                      >
-                                        Resend
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={() =>
-                                          void handleParticipantMutation(
-                                            () =>
-                                              cancelInvite({
-                                                meetingId,
-                                                inviteId: invite._id,
-                                              }),
-                                            "Invite cancelled",
-                                          )
-                                        }
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </>
-                                  ) : null}
-                                  {invite.resolvedStatus === "accepted" ? (
-                                    <Badge variant="secondary" className="text-[10px]">
-                                      Accepted
-                                    </Badge>
-                                  ) : null}
-                                  {invite.resolvedStatus === "cancelled" ? (
-                                    <Badge variant="outline" className="text-[10px]">
-                                      Cancelled
-                                    </Badge>
-                                  ) : null}
-                                  {invite.resolvedStatus === "expired" ? (
-                                    <Badge variant="outline" className="text-[10px]">
-                                      Expired
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </ScrollArea>
-                    </TabsContent>
-                  </Tabs>
-
-                  <DialogFooter>
-                    <Button onClick={() => void handleSaveSettings()} disabled={isSavingSettings}>
-                      {isSavingSettings ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Saving
-                        </>
-                      ) : (
-                        "Save changes"
-                      )}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            ) : null}
 
           <ScrollArea className="h-full pr-3">
             <div className="space-y-4">
@@ -1005,6 +795,216 @@ export function MeetingSidePanel({
           </ScrollArea>
         </TabsContent>
       </Tabs>
+
+      {/* Settings Dialog — rendered outside Tabs so it works regardless of active tab */}
+      {canChangeSettings ? (
+        <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Meeting settings</DialogTitle>
+              <DialogDescription>
+                Control access, lobby behavior, and participant privileges.
+              </DialogDescription>
+            </DialogHeader>
+
+            <Tabs defaultValue="settings" className="mt-2">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="settings">
+                  <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+                  Settings
+                </TabsTrigger>
+                <TabsTrigger value="invite">
+                  <UserCheck className="mr-1.5 h-3.5 w-3.5" />
+                  Invite
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Settings Tab ── */}
+              <TabsContent value="settings" className="mt-4 space-y-5">
+                {/* Join Mode */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Join Mode
+                  </p>
+                  <Select
+                    value={settingsDraft.joinMode}
+                    onValueChange={(value) =>
+                      setSettingsDraft((current) => ({
+                        ...current,
+                        joinMode: value as MeetingJoinMode,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="organization_only">Organization only</SelectItem>
+                      <SelectItem value="invite_only">Invite only</SelectItem>
+                      <SelectItem value="anyone_with_link">Anyone with link</SelectItem>
+                      <SelectItem value="ask_to_join">Ask to join</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Permission Toggles */}
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Permissions
+                  </p>
+                  <div className="rounded-lg border border-border divide-y divide-border">
+                    {[
+                      ["allowScreenShare", "Allow screen share"],
+                      ["allowWhiteboard", "Allow whiteboard"],
+                      ["allowChat", "Allow chat"],
+                      ["allowReactions", "Allow reactions"],
+                      ["allowRecording", "Allow recording"],
+                      ["allowParticipantsToUnmute", "Allow participants to unmute"],
+                      ["autoAdmitOrgUsers", "Auto-admit org users"],
+                      ["lobbyEnabled", "Enable lobby"],
+                    ].map(([field, label]) => (
+                      <div key={field} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <p className="text-sm text-foreground">{label}</p>
+                        <Switch
+                          checked={settingsDraft[field as keyof MeetingSettings] as boolean}
+                          onCheckedChange={(checked) =>
+                            setSettingsDraft((current) => ({
+                              ...current,
+                              [field]: checked,
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Lock Meeting */}
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    {lockDraft ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
+                    <p className="text-sm text-foreground">Lock meeting</p>
+                  </div>
+                  <Switch checked={lockDraft} onCheckedChange={setLockDraft} />
+                </div>
+              </TabsContent>
+
+              {/* ── Invite Tab ── */}
+              <TabsContent value="invite" className="mt-4 space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Add emails to invite participants to this meeting.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={inviteEmailsInput}
+                    onChange={(event) => setInviteEmailsInput(event.target.value)}
+                    placeholder="alex@company.com, sam@company.com"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => void handleInviteParticipants()}
+                    disabled={isInviting}
+                  >
+                    {isInviting ? "Inviting..." : "Invite"}
+                  </Button>
+                </div>
+
+                <ScrollArea className="h-52 rounded-md border border-border/60 p-2">
+                  <div className="space-y-2">
+                    {meetingInvites.length === 0 ? (
+                      <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                        No invites yet.
+                      </p>
+                    ) : (
+                      meetingInvites.map((invite) => (
+                        <div
+                          key={invite._id}
+                          className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-foreground">
+                              {invite.email}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {roleLabel(invite.role)} · {inviteStatusLabel(invite.resolvedStatus)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {invite.resolvedStatus !== "accepted" && invite.resolvedStatus !== "cancelled" ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void handleParticipantMutation(
+                                      () =>
+                                        resendInvite({
+                                          meetingId,
+                                          inviteId: invite._id,
+                                        }),
+                                      "Invite resent",
+                                    )
+                                  }
+                                >
+                                  Resend
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() =>
+                                    void handleParticipantMutation(
+                                      () =>
+                                        cancelInvite({
+                                          meetingId,
+                                          inviteId: invite._id,
+                                        }),
+                                      "Invite cancelled",
+                                    )
+                                  }
+                                >
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : null}
+                            {invite.resolvedStatus === "accepted" ? (
+                              <Badge variant="secondary" className="text-[10px]">
+                                Accepted
+                              </Badge>
+                            ) : null}
+                            {invite.resolvedStatus === "cancelled" ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Cancelled
+                              </Badge>
+                            ) : null}
+                            {invite.resolvedStatus === "expired" ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Expired
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
+
+            <DialogFooter>
+              <Button onClick={() => void handleSaveSettings()} disabled={isSavingSettings}>
+                {isSavingSettings ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving
+                  </>
+                ) : (
+                  "Save changes"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

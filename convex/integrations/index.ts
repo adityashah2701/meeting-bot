@@ -385,14 +385,6 @@ function createHeadingBlock(
   };
 }
 
-function createDividerBlock(): NotionBlock {
-  return {
-    object: "block",
-    type: "divider",
-    divider: {},
-  };
-}
-
 function createLabeledListItem(
   label: string,
   value: string,
@@ -406,78 +398,6 @@ function createLabeledListItem(
   ];
   const block = createBlockFromRichText("bulleted_list_item", richText);
   return block ? [block] : [];
-}
-
-function parseMarkdownToBlocks(markdown: string) {
-  const lines = markdown
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd());
-  const blocks: NotionBlock[] = [];
-  let paragraphLines: string[] = [];
-
-  const flushParagraph = () => {
-    const paragraph = paragraphLines.join(" ").trim();
-    paragraphLines = [];
-    if (!paragraph) {
-      return;
-    }
-    blocks.push(...createTextBlocks("paragraph", paragraph, { markdown: true }));
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      flushParagraph();
-      continue;
-    }
-
-    const todoMatch = trimmed.match(/^[-*]\s+\[( |x|X)\]\s+(.+)$/);
-    if (todoMatch) {
-      flushParagraph();
-      blocks.push(
-        ...createTextBlocks("to_do", todoMatch[2], {
-          checked: todoMatch[1].toLowerCase() === "x",
-          markdown: true,
-        }),
-      );
-      continue;
-    }
-
-    const headingMatch = trimmed.match(/^#{1,3}\s+(.+)$/);
-    if (headingMatch) {
-      flushParagraph();
-      blocks.push(createHeadingBlock("heading_3", headingMatch[1]));
-      continue;
-    }
-
-    const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
-    if (numberedMatch) {
-      flushParagraph();
-      blocks.push(
-        ...createTextBlocks("numbered_list_item", numberedMatch[1], {
-          markdown: true,
-        }),
-      );
-      continue;
-    }
-
-    const bulletMatch = trimmed.match(/^[-*+]\s+(.+)$/);
-    if (bulletMatch) {
-      flushParagraph();
-      blocks.push(
-        ...createTextBlocks("bulleted_list_item", bulletMatch[1], {
-          markdown: true,
-        }),
-      );
-      continue;
-    }
-
-    paragraphLines.push(trimmed);
-  }
-
-  flushParagraph();
-  return blocks;
 }
 
 function createSectionBlocks(
@@ -506,164 +426,668 @@ function formatMeetingTimestamp(
   }).format(timestamp);
 }
 
-function buildNotionMeetingBlocks(args: {
-  meeting: {
-    _id: Id<"meetings">;
-    title: string;
-    purpose: string;
-    description?: string;
-    status: "scheduled" | "active" | "ended";
-    orgId: string;
-    scheduledFor?: number;
-    scheduledEndsAt?: number;
-    scheduledTimeZone?: string;
-    summary: string | null;
-    key_points: string[];
-    decisions: string[];
-    action_items: Array<{ task: string; assignee?: string | null; due?: string | null }>;
+type NotionMeetingExportMeeting = {
+  _id: Id<"meetings">;
+  title: string;
+  purpose: string;
+  description?: string;
+  status: "scheduled" | "active" | "ended";
+  orgId: string;
+  scheduledFor?: number;
+  scheduledEndsAt?: number;
+  scheduledTimeZone?: string;
+  summary: string | null;
+  key_points: string[];
+  decisions: string[];
+  action_items: Array<{ task: string; assignee?: string | null; due?: string | null }>;
+};
+
+type NotionMeetingTranscript = {
+  speakerName: string;
+  text: string;
+  timestamp: number;
+};
+
+type NotionMeetingRecording = {
+  playbackUrl?: string | null;
+  startedAt: number;
+  status: string;
+};
+
+type CleanTranscriptEntry = {
+  speakerName: string;
+  text: string;
+  timestamp: number;
+};
+
+const GENERIC_MEETING_LABELS = new Set([
+  "call",
+  "check",
+  "discussion",
+  "meeting",
+  "quick call",
+  "sync",
+  "test",
+]);
+
+function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function stripMarkdown(value: string) {
+  return normalizeWhitespace(
+    value
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[*_~`>#]/g, " ")
+      .replace(/\s+/g, " "),
+  );
+}
+
+function sentenceCase(value: string) {
+  const trimmed = normalizeWhitespace(value);
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function dedupeStrings(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const normalized = normalizeWhitespace(value).toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(sentenceCase(value));
+  }
+
+  return result;
+}
+
+function normalizeHeadingToken(value: string) {
+  return value.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function extractMarkdownSection(markdown: string | null, headings: string[]) {
+  if (!markdown) {
+    return "";
+  }
+
+  const targetHeadings = new Set(headings.map(normalizeHeadingToken));
+  const lines = markdown.split(/\r?\n/);
+  const captured: string[] = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const headingMatch = line.trim().match(/^#{1,6}\s+(.+)$/);
+    if (headingMatch) {
+      const normalizedHeading = normalizeHeadingToken(headingMatch[1]);
+      if (targetHeadings.has(normalizedHeading)) {
+        inSection = true;
+        continue;
+      }
+
+      if (inSection) {
+        break;
+      }
+    }
+
+    if (inSection) {
+      captured.push(line);
+    }
+  }
+
+  return stripMarkdown(captured.join(" "));
+}
+
+function splitIntoSentences(value: string) {
+  return stripMarkdown(value)
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => normalizeWhitespace(part))
+    .filter(Boolean);
+}
+
+function isGenericMeetingLabel(value?: string | null) {
+  const normalized = normalizeWhitespace(value ?? "").toLowerCase();
+  return !normalized || GENERIC_MEETING_LABELS.has(normalized);
+}
+
+function detectPrimaryIssue(text: string) {
+  const lower = text.toLowerCase();
+
+  if (
+    /(audio|sound|voice|hear|hearing|mic|microphone)/.test(lower)
+    && /(issue|problem|not|get|hear|missing|fail|can'?t|cannot)/.test(lower)
+  ) {
+    return "a likely audio delivery issue during the call";
+  }
+
+  if (
+    /(camera|video|screen|presentation)/.test(lower)
+    && /(issue|problem|not|missing|fail|can'?t|cannot)/.test(lower)
+  ) {
+    return "a likely camera or video delivery issue during the call";
+  }
+
+  if (/(whiteboard|diagram|canvas|draw)/.test(lower)) {
+    return "collaborative whiteboard review and live editing";
+  }
+
+  return null;
+}
+
+function inferMeetingTitle(
+  meeting: Pick<NotionMeetingExportMeeting, "title" | "purpose" | "summary">,
+  transcripts: NotionMeetingTranscript[],
+) {
+  const combinedText = [
+    meeting.title,
+    meeting.purpose,
+    meeting.summary ?? "",
+    ...transcripts.map((line) => line.text),
+  ].join(" ");
+  const primaryIssue = detectPrimaryIssue(combinedText);
+
+  if (!isGenericMeetingLabel(meeting.title)) {
+    return sentenceCase(meeting.title);
+  }
+
+  if (primaryIssue?.includes("audio")) {
+    return "Audio and Connectivity Check";
+  }
+
+  if (primaryIssue?.includes("camera") || primaryIssue?.includes("video")) {
+    return "Video and Connectivity Check";
+  }
+
+  if (primaryIssue?.includes("whiteboard")) {
+    return "Whiteboard Working Session";
+  }
+
+  if (!isGenericMeetingLabel(meeting.purpose)) {
+    return sentenceCase(meeting.purpose);
+  }
+
+  return "Meeting Notes";
+}
+
+function inferMeetingPurpose(
+  meeting: Pick<NotionMeetingExportMeeting, "purpose" | "summary">,
+  transcripts: NotionMeetingTranscript[],
+) {
+  if (!isGenericMeetingLabel(meeting.purpose)) {
+    return sentenceCase(meeting.purpose);
+  }
+
+  const combinedText = [meeting.summary ?? "", ...transcripts.map((line) => line.text)].join(" ");
+  const primaryIssue = detectPrimaryIssue(combinedText);
+
+  if (primaryIssue?.includes("audio")) {
+    return "Quick call to validate meeting connectivity and troubleshoot audio delivery.";
+  }
+
+  if (primaryIssue?.includes("camera") || primaryIssue?.includes("video")) {
+    return "Quick call to validate meeting connectivity and troubleshoot camera or video delivery.";
+  }
+
+  if (primaryIssue?.includes("whiteboard")) {
+    return "Review and validate the shared whiteboard experience.";
+  }
+
+  return "Exploratory check-in with no clearly defined agenda.";
+}
+
+function formatDuration(durationMs?: number | null) {
+  if (!durationMs || durationMs < 60_000) {
+    return null;
+  }
+
+  const totalMinutes = Math.round(durationMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0 && minutes > 0) {
+    return `${hours} hr ${minutes} min`;
+  }
+  if (hours > 0) {
+    return `${hours} hr`;
+  }
+  return `${minutes} min`;
+}
+
+function deriveDurationLabel(
+  meeting: Pick<NotionMeetingExportMeeting, "scheduledFor" | "scheduledEndsAt">,
+  transcripts: NotionMeetingTranscript[],
+) {
+  if (
+    typeof meeting.scheduledFor === "number"
+    && typeof meeting.scheduledEndsAt === "number"
+    && meeting.scheduledEndsAt > meeting.scheduledFor
+  ) {
+    return formatDuration(meeting.scheduledEndsAt - meeting.scheduledFor);
+  }
+
+  if (transcripts.length >= 2) {
+    const timestamps = transcripts
+      .map((line) => line.timestamp)
+      .filter((timestamp) => typeof timestamp === "number" && !Number.isNaN(timestamp))
+      .sort((a, b) => a - b);
+
+    if (timestamps.length >= 2) {
+      return formatDuration(timestamps[timestamps.length - 1] - timestamps[0]);
+    }
+  }
+
+  return null;
+}
+
+function deriveParticipants(transcripts: NotionMeetingTranscript[]) {
+  return dedupeStrings(
+    transcripts
+      .map((line) => normalizeWhitespace(line.speakerName))
+      .filter(Boolean),
+  );
+}
+
+function seemsLikeGreetingNoise(text: string) {
+  const normalized = text.toLowerCase().replace(/[^a-z\s]/g, " ");
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  const greetingTokens = new Set([
+    "hello",
+    "halo",
+    "hi",
+    "hey",
+    "okay",
+    "ok",
+    "hmm",
+    "mm",
+    "man",
+    "ya",
+  ]);
+
+  const unique = new Set(tokens);
+  if (tokens.length >= 3 && unique.size <= 2) {
+    return true;
+  }
+
+  return tokens.every((token) => greetingTokens.has(token));
+}
+
+function normalizeTranscriptLine(text: string) {
+  const trimmed = normalizeWhitespace(text);
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/seeing that you are speaking.*not getting the sound/i.test(trimmed)) {
+    return "Could see the other participant speaking but could not hear audio, and asked whether the issue was with the call.";
+  }
+
+  if (/नहीं.*आ\s*रहा/i.test(trimmed)) {
+    return "Reported that the audio was not coming through.";
+  }
+
+  if (/आया कोई/i.test(trimmed)) {
+    return "Asked whether anyone had joined the call.";
+  }
+
+  if (seemsLikeGreetingNoise(trimmed)) {
+    return null;
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (
+    /(all bold|i have eyes|now they that i like or be with that|वैकवार)/i.test(trimmed)
+    || (trimmed.length < 12 && !/(audio|sound|hear|mic|camera|video|issue|problem)/.test(lower))
+  ) {
+    return null;
+  }
+
+  return sentenceCase(trimmed);
+}
+
+function buildCleanTranscript(
+  transcripts: NotionMeetingTranscript[],
+): {
+  entries: CleanTranscriptEntry[];
+  noisy: boolean;
+  summaries: Array<{ speakerName: string; text: string }>;
+} {
+  const cleanedEntries: CleanTranscriptEntry[] = [];
+  const speakerOrder: string[] = [];
+  const rawBySpeaker = new Map<string, string[]>();
+  const cleanedBySpeaker = new Map<string, string[]>();
+
+  for (const line of transcripts) {
+    const speakerName = normalizeWhitespace(line.speakerName) || "Unknown speaker";
+    if (!speakerOrder.includes(speakerName)) {
+      speakerOrder.push(speakerName);
+    }
+
+    rawBySpeaker.set(speakerName, [...(rawBySpeaker.get(speakerName) ?? []), line.text]);
+
+    const normalizedLine = normalizeTranscriptLine(line.text);
+    if (!normalizedLine) {
+      continue;
+    }
+
+    cleanedEntries.push({
+      speakerName,
+      text: normalizedLine,
+      timestamp: line.timestamp,
+    });
+    cleanedBySpeaker.set(speakerName, [
+      ...(cleanedBySpeaker.get(speakerName) ?? []),
+      normalizedLine,
+    ]);
+  }
+
+  const noisy =
+    transcripts.length > 0
+    && (cleanedEntries.length === 0 || cleanedEntries.length <= Math.ceil(transcripts.length * 0.35));
+
+  const summaries = speakerOrder.flatMap((speakerName) => {
+    const cleanedLines = dedupeStrings(cleanedBySpeaker.get(speakerName) ?? []);
+    const rawLines = (rawBySpeaker.get(speakerName) ?? []).map((line) => line.toLowerCase());
+    const combined = cleanedLines.join(" ").toLowerCase();
+
+    if (
+      /(audio|sound|hear|speaking)/.test(combined)
+      && /(not|issue|problem|could not|couldn'?t)/.test(combined)
+    ) {
+      return [{
+        speakerName,
+        text: "Observed that the other participant appeared to be speaking, but audio was not coming through and raised it as the main issue.",
+      }];
+    }
+
+    if (
+      cleanedLines.some((line) => /joined the call/i.test(line))
+      || rawLines.some((line) => /hello|halo|camera|आया कोई/i.test(line))
+    ) {
+      return [{
+        speakerName,
+        text: "Appeared to be testing whether participants, audio, and camera were working correctly.",
+      }];
+    }
+
+    if (cleanedLines.length > 0) {
+      return [{
+        speakerName,
+        text: cleanedLines.slice(0, 2).join(" "),
+      }];
+    }
+
+    return [];
+  });
+
+  return {
+    entries: cleanedEntries,
+    noisy,
+    summaries,
   };
-  transcripts: Array<{ speakerName: string; text: string; timestamp: number }>;
-  recordings: Array<{ playbackUrl?: string | null; startedAt: number; status: string }>;
+}
+
+function detectDominantSpeaker(entries: CleanTranscriptEntry[]) {
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    counts.set(entry.speakerName, (counts.get(entry.speakerName) ?? 0) + 1);
+  }
+
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const [top, second] = ranked;
+  if (!top) {
+    return null;
+  }
+
+  if (!second || top[1] >= second[1] * 1.5) {
+    return top[0];
+  }
+
+  return null;
+}
+
+function sanitizeInsight(value: string) {
+  return sentenceCase(
+    stripMarkdown(value)
+      .replace(/^[-*•]\s*/, "")
+      .replace(/\bappears to be\b/gi, "is")
+      .replace(/\bseems to be\b/gi, "is")
+      .replace(/\bpotentially\b/gi, "")
+      .replace(/\s{2,}/g, " "),
+  );
+}
+
+function buildFallbackActionItems(args: {
+  primaryIssue: string | null;
+  participants: string[];
+  dominantSpeaker: string | null;
+  meetingQuality: "structured" | "exploratory" | "unstructured";
+}) {
+  const defaultOwner = args.dominantSpeaker ?? args.participants[0] ?? "Unassigned";
+
+  if (args.primaryIssue?.includes("audio")) {
+    return [
+      {
+        task: "Reproduce and investigate the reported audio issue in a controlled test call",
+        owner: defaultOwner,
+        deadline: null,
+      },
+    ];
+  }
+
+  if (args.meetingQuality !== "structured") {
+    return [
+      {
+        task: "Schedule a follow-up meeting with a clear agenda and test checklist",
+        owner: defaultOwner,
+        deadline: null,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function buildNotionMeetingBlocks(args: {
+  meeting: NotionMeetingExportMeeting;
+  transcripts: NotionMeetingTranscript[];
+  recordings: NotionMeetingRecording[];
 }) {
   const joinUrl = getMeetingJoinUrl(args.meeting._id);
   const detailUrl = buildPublicAppUrl(`/meeting/${args.meeting._id}/details`);
-  const blocks: NotionBlock[] = [];
   const statusLabel =
     args.meeting.status.charAt(0).toUpperCase() + args.meeting.status.slice(1);
+  const participants = deriveParticipants(args.transcripts);
+  const cleanTranscript = buildCleanTranscript(args.transcripts);
+  const dominantSpeaker = detectDominantSpeaker(cleanTranscript.entries);
+  const combinedSignalText = [
+    args.meeting.title,
+    args.meeting.purpose,
+    args.meeting.summary ?? "",
+    ...args.meeting.key_points,
+    ...args.meeting.decisions,
+    ...cleanTranscript.entries.map((entry) => entry.text),
+  ].join(" ");
+  const primaryIssue = detectPrimaryIssue(combinedSignalText);
+  const meetingQuality: "structured" | "exploratory" | "unstructured" =
+    cleanTranscript.entries.length <= 2 && args.meeting.decisions.length === 0
+      ? "unstructured"
+      : args.meeting.decisions.length === 0 && args.meeting.action_items.length <= 1
+        ? "exploratory"
+        : "structured";
 
-  const scheduledLabel = formatMeetingTimestamp(
-    args.meeting.scheduledFor,
-    args.meeting.scheduledTimeZone,
-  );
-  const snapshotBlocks: NotionBlock[] = [
+  const summaryOverview = extractMarkdownSection(args.meeting.summary, ["Overview"]);
+  const summaryRisks = extractMarkdownSection(args.meeting.summary, [
+    "Risks",
+    "Risks/Blockers",
+    "Blockers",
+  ]);
+
+  const dateLabel =
+    formatMeetingTimestamp(
+      args.meeting.scheduledFor ?? args.transcripts[0]?.timestamp ?? args.recordings[0]?.startedAt,
+      args.meeting.scheduledTimeZone,
+    ) ?? "Not available";
+  const durationLabel =
+    deriveDurationLabel(args.meeting, args.transcripts) ?? "Not available";
+  const participantLabel = participants.length > 0 ? participants.join(", ") : "Not captured";
+  const purposeLabel = inferMeetingPurpose(args.meeting, args.transcripts);
+  const recordingLink = args.recordings.find((recording) => recording.playbackUrl)?.playbackUrl;
+
+  const executiveSummary = dedupeStrings([
+    primaryIssue
+      ? `The meeting focused on ${primaryIssue}.`
+      : "The meeting was primarily a short check-in rather than a deep working session.",
+    meetingQuality === "unstructured"
+      ? "The call was unstructured and low-signal, with limited discussion beyond basic troubleshooting."
+      : meetingQuality === "exploratory"
+        ? "The conversation was exploratory and did not reach a clearly structured conclusion."
+        : "The conversation stayed focused enough to surface concrete follow-ups.",
+    dominantSpeaker
+      ? `${dominantSpeaker} drove most of the discussion, while the rest of the participation was comparatively light.`
+      : "Participation was limited and relatively evenly distributed.",
+    summaryOverview
+      ? splitIntoSentences(summaryOverview)[0] ?? ""
+      : "",
+    args.meeting.decisions.length === 0
+      ? "No firm decisions were made during the call."
+      : `The clearest decision was: ${sanitizeInsight(args.meeting.decisions[0])}`,
+  ]).slice(0, 5);
+
+  const keyInsights = dedupeStrings([
+    ...args.meeting.key_points.map(sanitizeInsight),
+    primaryIssue
+      ? `The strongest signal in the meeting was ${primaryIssue}.`
+      : "",
+    cleanTranscript.noisy
+      ? "Transcript quality was noisy, so only high-signal content was retained in the final notes."
+      : "",
+    meetingQuality === "unstructured"
+      ? "The call felt more like a live troubleshooting check than a planned project discussion."
+      : "",
+  ]).filter(Boolean);
+
+  const risks = dedupeStrings([
+    summaryRisks,
+    primaryIssue
+      ? `There may still be unresolved follow-up needed around ${primaryIssue.replace(/^a likely /, "")}.`
+      : "",
+    cleanTranscript.noisy
+      ? "The transcript included heavy filler and fragmented multilingual lines, which reduced note quality and clarity."
+      : "",
+    meetingQuality !== "structured"
+      ? "The lack of a clear agenda made it harder to isolate next steps during the call."
+      : "",
+  ]).filter(Boolean);
+
+  const decisions = dedupeStrings(args.meeting.decisions.map(sanitizeInsight));
+  const actionItems = (
+    args.meeting.action_items.length > 0
+      ? args.meeting.action_items.map((item) => ({
+          task: sentenceCase(stripMarkdown(item.task)),
+          owner: normalizeWhitespace(item.assignee ?? "") || "Unassigned",
+          deadline: normalizeWhitespace(item.due ?? "") || null,
+        }))
+      : buildFallbackActionItems({
+          primaryIssue,
+          participants,
+          dominantSpeaker,
+          meetingQuality,
+        })
+  ).filter((item) => item.task);
+
+  const metadataBlocks: NotionBlock[] = [
     ...createLabeledListItem("Status", statusLabel),
+    ...createLabeledListItem("Date", dateLabel),
+    ...createLabeledListItem("Participants", participantLabel),
+    ...createLabeledListItem("Duration (if available)", durationLabel),
+    ...createLabeledListItem("Purpose", purposeLabel),
   ];
-  if (scheduledLabel) {
-    snapshotBlocks.push(...createLabeledListItem("Scheduled for", scheduledLabel));
-  }
-  if (args.meeting.purpose) {
-    snapshotBlocks.push(...createLabeledListItem("Purpose", args.meeting.purpose));
-  }
-  if (args.meeting.description) {
-    snapshotBlocks.push(...createLabeledListItem("Notes", args.meeting.description));
-  }
 
-  blocks.push(...createSectionBlocks("Meeting Snapshot", snapshotBlocks));
+  const linkBlocks: NotionBlock[] = [
+    ...(joinUrl
+      ? createLabeledListItem("Join Meeting", "Open live room", { link: joinUrl })
+      : createLabeledListItem("Join Meeting", "Not available")),
+    ...(recordingLink
+      ? createLabeledListItem("Recording", "Open recording", { link: recordingLink })
+      : createLabeledListItem("Recording", "Not available")),
+    ...(detailUrl
+      ? createLabeledListItem("Related Docs", "Open meeting details", { link: detailUrl })
+      : createLabeledListItem("Related Docs", "Not available")),
+  ];
 
-  const linkBlocks: NotionBlock[] = [];
-  if (joinUrl) {
-    linkBlocks.push(...createLabeledListItem("Join meeting", "Open live room", { link: joinUrl }));
-  }
-  if (detailUrl) {
-    linkBlocks.push(
-      ...createLabeledListItem("Meeting details", "Open in Meeting Bot", {
-        link: detailUrl,
-      }),
-    );
-  }
-  blocks.push(...createSectionBlocks("Links", linkBlocks));
-  if (blocks.length > 0) {
-    blocks.push(createDividerBlock());
-  }
-
-  blocks.push(
-    ...createSectionBlocks(
-      "Summary",
-      args.meeting.summary
-        ? parseMarkdownToBlocks(args.meeting.summary)
-        : createTextBlocks("paragraph", "Summary not generated yet."),
-    ),
+  const executiveSummaryBlocks = executiveSummary.flatMap((item) =>
+    createTextBlocks("bulleted_list_item", item),
   );
+  const keyInsightBlocks = (keyInsights.length > 0 ? keyInsights : ["No high-signal insights captured."])
+    .flatMap((item) => createTextBlocks("bulleted_list_item", item));
+  const riskBlocks = (risks.length > 0 ? risks : ["No significant blockers were captured."])
+    .flatMap((item) => createTextBlocks("bulleted_list_item", item));
+  const decisionBlocks =
+    decisions.length > 0
+      ? decisions.flatMap((item) => createTextBlocks("bulleted_list_item", item))
+      : createTextBlocks("paragraph", "No clear decisions made");
+  const actionItemBlocks =
+    actionItems.length > 0
+      ? actionItems.flatMap((item) => {
+          const formatted = [
+            item.task,
+            item.owner,
+            item.deadline || null,
+          ].filter(Boolean).join(" — ");
+          return createTextBlocks("to_do", formatted, { checked: false });
+        })
+      : createTextBlocks("to_do", "No action items captured — Unassigned", {
+          checked: false,
+        });
 
-  blocks.push(
-    ...createSectionBlocks(
-      "Key Points",
-      args.meeting.key_points.flatMap((point) => createTextBlocks("bulleted_list_item", point)),
-    ),
-  );
-
-  blocks.push(
-    ...createSectionBlocks(
-      "Decisions",
-      args.meeting.decisions.flatMap((decision) =>
-        createTextBlocks("bulleted_list_item", decision)
-      ),
-    ),
-  );
-
-  blocks.push(
-    ...createSectionBlocks(
-      "Action Items",
-      args.meeting.action_items.flatMap((item) => {
-        const richText = [
-          ...createMarkdownRichText(item.task),
-          ...(item.assignee
-            ? [
-                ...createRichText(" | ", undefined),
-                ...createRichText("Assignee: ", undefined, { bold: true }),
-                ...createRichText(item.assignee),
-              ]
-            : []),
-          ...(item.due
-            ? [
-                ...createRichText(" | ", undefined),
-                ...createRichText("Due: ", undefined, { bold: true }),
-                ...createRichText(item.due),
-              ]
-            : []),
-        ];
-        const block = createBlockFromRichText("to_do", richText);
-        return block ? [block] : [];
-      }),
-    ),
-  );
-
-  const recordingBlocks = args.recordings.flatMap((recording, index) => {
-    const startedLabel = formatMeetingTimestamp(recording.startedAt);
-    const label = startedLabel
-      ? `Recording ${index + 1} (${startedLabel})`
-      : `Recording ${index + 1}`;
-    if (!recording.playbackUrl) {
-      return createTextBlocks("bulleted_list_item", `${label} - ${recording.status}`);
-    }
-    return createTextBlocks("bulleted_list_item", label, {
-      link: recording.playbackUrl,
-    });
-  });
-
-  blocks.push(...createSectionBlocks("Recordings", recordingBlocks));
-
-  const transcriptBlocks = args.transcripts.flatMap((line) => {
+  const cleanTranscriptBlocks = (
+    cleanTranscript.noisy ? cleanTranscript.summaries : cleanTranscript.entries
+  ).flatMap((line) => {
     const richText = [
-      ...createRichText(line.speakerName || "Unknown speaker", undefined, {
-        bold: true,
-      }),
-      ...createRichText(
-        ` (${formatMeetingTimestamp(line.timestamp) ?? "Unknown time"})`,
-        undefined,
-        { italic: true, color: "gray" },
-      ),
+      ...createRichText(line.speakerName, undefined, { bold: true }),
       ...createRichText(": "),
       ...createMarkdownRichText(line.text),
     ];
     const block = createBlockFromRichText("paragraph", richText);
     return block ? [block] : [];
   });
-  blocks.push(...createSectionBlocks("Transcript", transcriptBlocks));
 
-  return blocks;
+  return [
+    ...createSectionBlocks("📌 Metadata", metadataBlocks),
+    ...createSectionBlocks("🔗 Links", linkBlocks),
+    ...createSectionBlocks("🧾 Executive Summary", executiveSummaryBlocks),
+    ...createSectionBlocks("🧠 Key Insights", keyInsightBlocks),
+    ...createSectionBlocks("⚠️ Risks / Blockers", riskBlocks),
+    ...createSectionBlocks("✅ Decisions Made", decisionBlocks),
+    ...createSectionBlocks("🎯 Action Items", actionItemBlocks),
+    ...createSectionBlocks("🗣 Clean Transcript", cleanTranscriptBlocks),
+  ];
 }
 
-function buildNotionMeetingPageTitle(meeting: {
-  title: string;
-  scheduledFor?: number;
-  scheduledTimeZone?: string;
-}) {
+function buildNotionMeetingPageTitle(
+  meeting: Pick<NotionMeetingExportMeeting, "title" | "purpose" | "summary" | "scheduledFor" | "scheduledTimeZone">,
+  transcripts: NotionMeetingTranscript[],
+) {
   const scheduledLabel = formatMeetingTimestamp(
     meeting.scheduledFor,
     meeting.scheduledTimeZone,
   );
-  const parts = [meeting.title.trim() || "Meeting"];
+  const parts = [inferMeetingTitle(meeting, transcripts)];
   if (scheduledLabel) {
     parts.push(scheduledLabel);
   }
@@ -1395,12 +1819,16 @@ export const exportMeetingToNotion = action({
         path: "/pages",
         accessToken: currentConnection.accessToken,
         body: {
+          icon: {
+            type: "emoji",
+            emoji: "🧠",
+          },
           parent: {
             page_id: currentConnection.targetPageId,
           },
           properties: {
             title: {
-              title: createRichText(buildNotionMeetingPageTitle(meeting)),
+              title: createRichText(buildNotionMeetingPageTitle(meeting, transcripts)),
             },
           },
           children: firstChunk,
