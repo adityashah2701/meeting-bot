@@ -37,6 +37,7 @@ const statConfig = [
     iconColor: "text-blue-500",
     iconBg: "bg-blue-500/10",
     trend: "+12%",
+    isLive: false,
   },
   {
     key: "activeMeetings",
@@ -56,6 +57,7 @@ const statConfig = [
     iconColor: "text-violet-500",
     iconBg: "bg-violet-500/10",
     trend: "+8%",
+    isLive: false,
   },
   {
     key: "openTasks",
@@ -65,6 +67,7 @@ const statConfig = [
     iconColor: "text-amber-500",
     iconBg: "bg-amber-500/10",
     trend: "Pending",
+    isLive: false,
   },
 ] as const;
 
@@ -237,7 +240,7 @@ export function DashboardPage() {
                 >
                   <Icon className={`h-5 w-5 ${item.iconColor}`} />
                 </div>
-                {item.isLive && value > 0 ? (
+                {item?.isLive && value > 0 ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
                     Live
