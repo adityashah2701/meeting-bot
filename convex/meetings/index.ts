@@ -791,7 +791,7 @@ export const endMeeting = mutation({
   args: { meetingId: v.id("meetings") },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
-    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
     const participant = await getMeetingParticipant(
       ctx,
       args.meetingId,
@@ -802,6 +802,12 @@ export const endMeeting = mutation({
       status: "ended",
       endedAt: Date.now(),
       lastActivityAt: Date.now(),
+    });
+
+    // Auto-clear any notifications linked to this meeting for all org members.
+    await ctx.scheduler.runAfter(0, internal.notifications.index.markReadByMeetingId, {
+      meetingId: args.meetingId,
+      orgId: meeting.orgId,
     });
 
     await insertAuditLog(ctx, {

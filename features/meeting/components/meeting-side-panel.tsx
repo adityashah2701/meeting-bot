@@ -132,6 +132,8 @@ export function MeetingSidePanel({
   isActivelyTranscribing = false,
   transcriptionMode,
   onTranscriptionModeChange,
+  settingsOpen = false,
+  onSettingsOpenChange,
 }: {
   meetingId: Id<"meetings">;
   transcript: TranscriptLine[];
@@ -139,6 +141,8 @@ export function MeetingSidePanel({
   isActivelyTranscribing?: boolean;
   transcriptionMode: TranscriptionMode;
   onTranscriptionModeChange: (mode: TranscriptionMode) => void;
+  settingsOpen?: boolean;
+  onSettingsOpenChange?: (open: boolean) => void;
 }) {
   const sendMessage = useMutation(meetingService.sendMessage);
   const saveSummary = useMutation(meetingService.saveSummary);
@@ -178,10 +182,11 @@ export function MeetingSidePanel({
   const [structuredResult, setStructuredResult] = useState<MeetingSummaryResult | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<MeetingSettings>(DEFAULT_SETTINGS);
   const [lockDraft, setLockDraft] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [inviteEmailsInput, setInviteEmailsInput] = useState("");
   const [isInviting, setIsInviting] = useState(false);
+
+  const handleSettingsOpenChange = onSettingsOpenChange ?? (() => {});
 
   useEffect(() => {
     if (!meeting?.settings) {
@@ -269,7 +274,7 @@ export function MeetingSidePanel({
         settings: settingsDraft,
         isLocked: lockDraft,
       });
-      setSettingsOpen(false);
+      handleSettingsOpenChange(false);
       toast.success("Meeting settings updated");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save settings");
@@ -507,14 +512,11 @@ export function MeetingSidePanel({
                 Join mode: {joinModeLabel(meeting?.settings?.joinMode ?? "organization_only")}
               </p>
             </div>
-            {canChangeSettings ? (
-              <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" variant="outline" className="gap-2">
-                    <Settings2 className="h-4 w-4" />
-                    Settings
-                  </Button>
-                </DialogTrigger>
+          </div>
+
+          {/* Settings Dialog — controlled from parent More drawer */}
+          {canChangeSettings ? (
+            <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
                 <DialogContent className="sm:max-w-2xl">
                   <DialogHeader>
                     <DialogTitle>Meeting settings</DialogTitle>
@@ -720,7 +722,6 @@ export function MeetingSidePanel({
                 </DialogContent>
               </Dialog>
             ) : null}
-          </div>
 
           <ScrollArea className="h-full pr-3">
             <div className="space-y-4">

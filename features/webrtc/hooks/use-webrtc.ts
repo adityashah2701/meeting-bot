@@ -85,7 +85,7 @@ export function useWebrtc(meetingId: Id<"meetings">) {
   const [presentationStream, setPresentationStream] = useState<MediaStream | null>(null);
   const [remoteCameraStreams, setRemoteCameraStreams] = useState<RemoteMediaStreams>({});
   const [remotePresentationStreams, setRemotePresentationStreams] = useState<RemoteMediaStreams>({});
-  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const [isAudioMuted, setIsAudioMuted] = useState(true);
   const [isVideoOff, setIsVideoOff] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -270,14 +270,21 @@ export function useWebrtc(meetingId: Id<"meetings">) {
 
         setPermissionDenied(false);
         localStreamRef.current = audioStream;
+
+        // Start with mic muted — disable tracks immediately after acquisition.
+        audioStream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+
         // Expose the audio-only stream so the transcription hook can attach
         // its AudioContext analyser to the microphone track.
         setLocalStream(audioStream);
 
         // Camera starts off — no video track acquired, no LED lit.
+        // Mic starts muted to match the initial isAudioMuted: true state.
         void updateMediaState({
           meetingId,
-          isMicEnabled: true,
+          isMicEnabled: false,
           isCameraEnabled: false,
           isScreenSharing: false,
         }).catch(() => undefined);
