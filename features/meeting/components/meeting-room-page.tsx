@@ -3,11 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
-import { AlertCircle, CircleDot, Clock3, Focus, Lock, Mic, MicOff, PanelRightClose, PanelRightOpen, Pin, Radio, ShieldAlert, StopCircle, Subtitles } from "lucide-react";
+import { AlertCircle, CircleDot, Clock3, Focus, Lock, Mic, MicOff, MoreHorizontal, PanelRightClose, PanelRightOpen, Pin, Radio, Settings2, ShieldAlert, StopCircle, Subtitles } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { LoadingBlock } from "@/components/shared/loading-block";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerClose,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import {
   meetingService,
   summarizeTranscript,
@@ -113,7 +121,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
 
   const [interimTranscript, setInterimTranscript] = useState<TranscriptLine | null>(null);
   const [queuedTranscriptLines, setQueuedTranscriptLines] = useState<TranscriptLine[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>("auto");
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
@@ -122,6 +130,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const [transcriptDock, setTranscriptDock] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
   const [isRecordingMedia, setIsRecordingMedia] = useState(false);
   const [isUploadingRecording, setIsUploadingRecording] = useState(false);
+  const [isMeetingSettingsOpen, setIsMeetingSettingsOpen] = useState(false);
   const dbTranscript = useMemo(() => transcriptRows ?? [], [transcriptRows]);
   const transcriptQueueRef = useRef<Array<{ text: string; timestamp: number }>>([]);
   const meetingCaptureRootRef = useRef<HTMLDivElement | null>(null);
@@ -705,16 +714,20 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   return (
     <div ref={meetingCaptureRootRef} className="flex h-screen flex-col overflow-hidden bg-background">
       {/* ── Header ── */}
-      <header className="shrink-0 border-b border-border bg-background/95 px-4 py-2.5 lg:px-5 backdrop-blur">
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="text-base font-semibold text-foreground lg:text-lg truncate">{meeting.title}</h1>
-          <div className="flex shrink-0 items-center gap-2">
-            {/* Meeting status badge */}
-            <div className="flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium uppercase text-primary">
+      <header className="shrink-0 border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
+        <div className="flex items-center justify-between gap-3">
+          {/* Left: title + status */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <h1 className="truncate text-sm font-semibold text-foreground lg:text-base">{meeting.title}</h1>
+            <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium uppercase text-primary">
               <Radio className="h-3 w-3" />
               <span>{meeting.status}</span>
             </div>
+          </div>
 
+          {/* Right: key action + status pills + drawer */}
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Recording controls */}
             {isRecordingActive ? (
               <Button
                 size="sm"
@@ -724,7 +737,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                 disabled={isUploadingRecording}
               >
                 <StopCircle className="h-3.5 w-3.5" />
-                {isUploadingRecording ? "Uploading..." : "Stop Recording"}
+                <span className="hidden sm:inline">{isUploadingRecording ? "Uploading..." : "Stop Rec"}</span>
               </Button>
             ) : canRecord ? (
               <Button
@@ -735,29 +748,29 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                 disabled={isUploadingRecording}
               >
                 <CircleDot className="h-3.5 w-3.5 text-red-500" />
-                Start Recording
+                <span className="hidden sm:inline">Start Rec</span>
               </Button>
             ) : null}
 
-            {/* Transcription status indicator */}
+            {/* Transcription pill */}
             {permissionDenied ? (
-              <div className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive" title="Microphone access denied">
+              <div className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive" title="Microphone access denied">
                 <AlertCircle className="h-3 w-3" />
-                <span>Mic blocked</span>
+                <span className="hidden sm:inline">Mic blocked</span>
               </div>
             ) : isActivelyTranscribing ? (
-              <div className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-3 py-1 text-xs font-medium text-green-600 dark:text-green-400" title="Transcription active">
+              <div className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-600 dark:text-green-400" title="Transcription active">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                 </span>
                 <Mic className="h-3 w-3" />
-                <span>Transcribing</span>
+                <span className="hidden sm:inline">Transcribing</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground" title="Transcription paused">
+              <div className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground" title="Transcription paused">
                 <MicOff className="h-3 w-3" />
-                <span>Mic off</span>
+                <span className="hidden sm:inline">Mic off</span>
               </div>
             )}
 
@@ -765,77 +778,150 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
               <div className="hidden text-xs text-destructive" title={transcriptionError} />
             )}
 
-            {/* Clock */}
-            <div className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            {/* Clock pill */}
+            <div className="hidden items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground sm:flex">
               <Clock3 className="h-3 w-3" />
               <span>{new Date().toLocaleTimeString()}</span>
             </div>
 
+            {/* Panel toggle */}
             <Button
               size="sm"
               variant="ghost"
-              className="rounded-full gap-1.5 text-xs"
+              className="gap-1.5 rounded-full text-xs"
               onClick={() => setIsSidebarOpen((cur) => !cur)}
+              title={isSidebarOpen ? "Hide panel" : "Show panel"}
             >
               {isSidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-              {isSidebarOpen ? "Hide" : "Show"} Panel
+              <span className="hidden lg:inline">{isSidebarOpen ? "Hide" : "Show"} Panel</span>
             </Button>
 
-            <Button
-              size="sm"
-              variant={focusMode ? "default" : "ghost"}
-              className="rounded-full gap-1.5 text-xs"
-              onClick={() => setFocusMode((cur) => !cur)}
-            >
-              <Focus className="h-4 w-4" />
-              Focus
-            </Button>
+            {/* ── View Options Drawer ── */}
+            <Drawer direction="right">
+              <DrawerTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-1.5 rounded-full text-xs">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="hidden sm:inline">More</span>
+                </Button>
+              </DrawerTrigger>
+              <DrawerContent className="flex h-full w-80 flex-col p-0">
+                <DrawerHeader className="border-b border-border px-4 py-3">
+                  <DrawerTitle className="text-sm font-semibold">View Options</DrawerTitle>
+                </DrawerHeader>
 
-            <Button
-              size="sm"
-              variant={compactRail ? "default" : "ghost"}
-              className="rounded-full gap-1.5 text-xs"
-              onClick={() => setCompactRail((cur) => !cur)}
-            >
-              <Pin className="h-4 w-4" />
-              Compact Rail
-            </Button>
+                <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+                  {/* Focus mode */}
+                  <button
+                    onClick={() => setFocusMode((cur) => !cur)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      focusMode
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-background text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Focus className="h-4 w-4" />
+                      <span>Focus mode</span>
+                    </div>
+                    <span className={`text-xs font-medium ${ focusMode ? "text-primary" : "text-muted-foreground" }`}>
+                      {focusMode ? "On" : "Off"}
+                    </span>
+                  </button>
 
-            <Button
-              size="sm"
-              variant={showFloatingTranscript ? "default" : "ghost"}
-              className="rounded-full gap-1.5 text-xs"
-              onClick={() => setShowFloatingTranscript((cur) => !cur)}
-            >
-              <Subtitles className="h-4 w-4" />
-              Floating Transcript
-            </Button>
+                  {/* Compact rail */}
+                  <button
+                    onClick={() => setCompactRail((cur) => !cur)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      compactRail
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-background text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Pin className="h-4 w-4" />
+                      <span>Compact rail</span>
+                    </div>
+                    <span className={`text-xs font-medium ${ compactRail ? "text-primary" : "text-muted-foreground" }`}>
+                      {compactRail ? "On" : "Off"}
+                    </span>
+                  </button>
 
-            <select
-              className="h-8 rounded-full border border-border bg-background px-3 text-xs"
-              value={pinnedParticipantId ?? ""}
-              onChange={(event) => setPinnedParticipantId(event.target.value || null)}
-            >
-              <option value="">No Pin</option>
-              {participants.map((participant) => (
-                <option key={participant._id} value={participant._id}>
-                  Pin: {participant.name}
-                </option>
-              ))}
-            </select>
+                  {/* Floating transcript */}
+                  <button
+                    onClick={() => setShowFloatingTranscript((cur) => !cur)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      showFloatingTranscript
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-background text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Subtitles className="h-4 w-4" />
+                      <span>Floating transcript</span>
+                    </div>
+                    <span className={`text-xs font-medium ${ showFloatingTranscript ? "text-primary" : "text-muted-foreground" }`}>
+                      {showFloatingTranscript ? "On" : "Off"}
+                    </span>
+                  </button>
 
-            {showFloatingTranscript ? (
-              <select
-                className="h-8 rounded-full border border-border bg-background px-3 text-xs"
-                value={transcriptDock}
-                onChange={(event) => setTranscriptDock(event.target.value as typeof transcriptDock)}
-              >
-                <option value="top-left">Top Left</option>
-                <option value="top-right">Top Right</option>
-                <option value="bottom-left">Bottom Left</option>
-                <option value="bottom-right">Bottom Right</option>
-              </select>
-            ) : null}
+                  {/* Transcript dock position — only visible when floating transcript is on */}
+                  {showFloatingTranscript ? (
+                    <div className="mt-1 rounded-lg border border-border bg-background px-3 py-2.5">
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">Transcript position</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((pos) => (
+                          <button
+                            key={pos}
+                            onClick={() => setTranscriptDock(pos)}
+                            className={`rounded-md border px-2 py-1.5 text-xs capitalize transition-colors ${
+                              transcriptDock === pos
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            {pos.replace("-", " ")}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Pin participant */}
+                  <div className="mt-1 rounded-lg border border-border bg-background px-3 py-2.5">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">Pin participant</p>
+                    <select
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+                      value={pinnedParticipantId ?? ""}
+                      onChange={(event) => setPinnedParticipantId(event.target.value || null)}
+                    >
+                      <option value="">No pin</option>
+                      {participants.map((participant) => (
+                        <option key={participant._id} value={participant._id}>
+                          {participant.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Meeting Settings — only for hosts/co-hosts */}
+                  {Boolean(meeting.effectivePermissions?.canChangeSettings) ? (
+                    <button
+                      onClick={() => setIsMeetingSettingsOpen(true)}
+                      className="mt-2 flex w-full items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Settings2 className="h-4 w-4 text-muted-foreground" />
+                      <span>Meeting Settings</span>
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="border-t border-border px-4 py-3">
+                  <DrawerClose asChild>
+                    <Button variant="outline" className="w-full text-sm">Close</Button>
+                  </DrawerClose>
+                </div>
+              </DrawerContent>
+            </Drawer>
           </div>
         </div>
 
@@ -859,12 +945,8 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
       </header>
 
       {/* ── Main body ── */}
-      <div
-        className={`grid min-h-0 flex-1 overflow-hidden pb-24 ${
-          isSidebarOpen ? "xl:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"
-        }`}
-      >
-        <div className="min-h-0 overflow-hidden p-3 lg:p-5">
+      <div className="flex min-h-0 flex-1 overflow-hidden pb-24">
+        <div className="min-h-0 flex-1 overflow-hidden p-3 lg:p-5">
           {currentParticipantStatus === "waiting" ? (
             <div className="flex h-full items-center justify-center">
               <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center">
@@ -917,8 +999,17 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
           )}
         </div>
 
-        {isSidebarOpen && currentParticipantStatus !== "removed" && currentParticipantStatus !== "rejected" ? (
-          <div className="min-h-0 overflow-hidden border-l border-border bg-card">
+        {/* Side panel — always mounted, slides in/out via width + opacity transition */}
+        <div
+          className={`min-h-0 shrink-0 overflow-hidden border-l border-border bg-card transition-all duration-300 ease-in-out ${
+            isSidebarOpen &&
+            currentParticipantStatus !== "removed" &&
+            currentParticipantStatus !== "rejected"
+              ? "w-[360px] opacity-100"
+              : "w-0 opacity-0"
+          }`}
+        >
+          <div className="h-full w-[360px]">
             <MeetingSidePanel
               meetingId={meetingId}
               transcript={transcript}
@@ -926,9 +1017,11 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
               isActivelyTranscribing={isActivelyTranscribing}
               transcriptionMode={transcriptionMode}
               onTranscriptionModeChange={setTranscriptionMode}
+              settingsOpen={isMeetingSettingsOpen}
+              onSettingsOpenChange={setIsMeetingSettingsOpen}
             />
           </div>
-        ) : null}
+        </div>
       </div>
 
       {/* ── Floating controls ── */}
