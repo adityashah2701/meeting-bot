@@ -24,6 +24,7 @@ import {
 import { integrationsService } from "@/features/integrations/services/integrations-service";
 import { MeetingFormInstant } from "@/features/meeting/components/meeting-form-instant";
 import { MeetingFormSchedule } from "@/features/meeting/components/meeting-form-schedule";
+import { getLocalDateTimeTimestamp } from "@/lib/meeting-schedule";
 
 function parseInviteEmails(value: string) {
   return [...new Set(
@@ -100,6 +101,7 @@ export function CreateMeetingDialog({
     description: string;
     date: string;
     time: string;
+    endTime: string;
     agenda: string;
     timeZone: string;
     syncWithGoogleCalendar: boolean;
@@ -111,7 +113,11 @@ export function CreateMeetingDialog({
 
     setIsSubmitting(true);
     try {
-      const scheduledFor = new Date(`${values.date}T${values.time}`).getTime();
+      const scheduledFor = getLocalDateTimeTimestamp(values.date, values.time);
+      const scheduledEndsAt = getLocalDateTimeTimestamp(
+        values.date,
+        values.endTime,
+      );
 
       await scheduleMeeting(createMeeting, {
         orgId,
@@ -119,13 +125,18 @@ export function CreateMeetingDialog({
         description: values.description,
         agenda: values.agenda,
         scheduledFor,
+        scheduledEndsAt,
         scheduledTimeZone: values.timeZone,
         syncWithGoogleCalendar: values.syncWithGoogleCalendar,
         inviteEmails: parseInviteEmails(inviteEmailsText),
       });
 
       setOpen(false);
-      toast.success("Meeting scheduled");
+      toast.success(
+        values.syncWithGoogleCalendar
+          ? "Meeting scheduled. Google Calendar sync is running in the background."
+          : "Meeting scheduled",
+      );
       router.refresh();
     } catch (error) {
       toast.error(

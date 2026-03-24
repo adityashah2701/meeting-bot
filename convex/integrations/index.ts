@@ -10,6 +10,14 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { assertOrgAccess, requireIdentity } from "../lib/auth";
 import { normalizeInviteEmail, resolveInviteStatus } from "../lib/invitations";
+import {
+  formatCalendarDateTimeInTimeZone,
+  resolveScheduledEndsAt,
+} from "../../lib/meeting-schedule";
+import {
+  buildPublicAppUrl,
+  getPublicAppUrl,
+} from "../../lib/public-app-url";
 
 const GOOGLE_PROVIDER = "google_calendar" as const;
 const GOOGLE_SYNC_STATUS_VALIDATOR = v.union(
@@ -30,15 +38,44 @@ type GoogleCalendarSyncContext = {
   attendeeEmails: string[];
 };
 
-function getMeetingJoinUrl(meetingId: Id<"meetings">) {
-  const appBaseUrl =
-    process.env.APP_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "";
-
-  if (!appBaseUrl) {
+function formatLogTimestamp(timestamp?: number | null) {
+  if (typeof timestamp !== "number" || Number.isNaN(timestamp)) {
     return null;
   }
 
-  return `${appBaseUrl.replace(/\/+$/, "")}/meeting/${meetingId}`;
+  return new Date(timestamp).toISOString();
+}
+
+function isGoogleCalendarAuthError(message?: string) {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("invalid_grant") ||
+    normalized.includes("invalid credentials") ||
+    normalized.includes("login required") ||
+    normalized.includes("refresh token") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("access token")
+  );
+}
+
+function isUsableGoogleCalendarConnection(connection: GoogleConnection | null) {
+  if (!connection || connection.status === "revoked") {
+    return false;
+  }
+
+  if (connection.status === "connected") {
+    return true;
+  }
+
+  return !isGoogleCalendarAuthError(connection.lastError);
+}
+
+function getMeetingJoinUrl(meetingId: Id<"meetings">) {
+  return buildPublicAppUrl(`/meeting/${meetingId}`);
 }
 
 function buildGoogleEventDescription(
@@ -70,6 +107,15 @@ async function exchangeGoogleRefreshToken(connection: GoogleConnection) {
     throw new Error("Google Calendar refresh token is missing");
   }
 
+  console.info("[google-calendar] Refreshing access token", {
+    connectionId: connection._id,
+    accountEmail: connection.accountEmail,
+    tokenExpiresAt: formatLogTimestamp(connection.tokenExpiresAt),
+    hasGoogleClientId: Boolean(clientId),
+    hasGoogleClientSecret: Boolean(clientSecret),
+    hasRefreshToken: Boolean(connection.refreshToken),
+  });
+
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: {
@@ -95,12 +141,30 @@ async function exchangeGoogleRefreshToken(connection: GoogleConnection) {
       };
 
   if (!response.ok || !("access_token" in payload) || !payload.access_token) {
+    console.error("[google-calendar] Access token refresh failed", {
+      connectionId: connection._id,
+      accountEmail: connection.accountEmail,
+      status: response.status,
+      error:
+        "error_description" in payload && payload.error_description
+          ? payload.error_description
+          : "Unable to refresh Google Calendar token",
+    });
     throw new Error(
       "error_description" in payload && payload.error_description
         ? payload.error_description
         : "Unable to refresh Google Calendar token",
     );
   }
+
+  console.info("[google-calendar] Access token refresh succeeded", {
+    connectionId: connection._id,
+    accountEmail: connection.accountEmail,
+    tokenExpiresAt: formatLogTimestamp(
+      Date.now() + Math.max(payload.expires_in ?? 3600, 60) * 1000,
+    ),
+    receivedRefreshToken: Boolean(payload.refresh_token),
+  });
 
   return {
     accessToken: payload.access_token,
@@ -130,19 +194,37 @@ export const getGoogleCalendarConnection = query({
       return {
         connected: false,
         provider: GOOGLE_PROVIDER,
+        hasRefreshToken: false,
+        hasGoogleClientId: Boolean(process.env.GOOGLE_CLIENT_ID),
+        hasGoogleClientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET),
+        hasConfiguredCalendarId: Boolean(process.env.GOOGLE_CALENDAR_ID),
+        publicAppUrlConfigured: Boolean(getPublicAppUrl()),
+        publicAppUrl: getPublicAppUrl() ?? undefined,
       } as const;
     }
 
+    const hasAuthError = !isUsableGoogleCalendarConnection(connection);
+    const warning =
+      connection.lastError && !hasAuthError ? connection.lastError : undefined;
+    const publicAppUrl = getPublicAppUrl();
+
     return {
-      connected: connection.status === "connected",
+      connected: !hasAuthError,
       provider: GOOGLE_PROVIDER,
       accountEmail: connection.accountEmail,
-      status: connection.status,
+      status: hasAuthError ? "error" : "connected",
       scope: connection.scope,
       tokenExpiresAt: connection.tokenExpiresAt,
       connectedAt: connection.connectedAt,
       updatedAt: connection.updatedAt,
-      lastError: connection.lastError,
+      lastError: hasAuthError ? connection.lastError : undefined,
+      warning,
+      hasRefreshToken: Boolean(connection.refreshToken),
+      hasGoogleClientId: Boolean(process.env.GOOGLE_CLIENT_ID),
+      hasGoogleClientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET),
+      hasConfiguredCalendarId: Boolean(process.env.GOOGLE_CALENDAR_ID),
+      publicAppUrlConfigured: Boolean(publicAppUrl),
+      publicAppUrl: publicAppUrl ?? undefined,
     } as const;
   },
 });
@@ -175,7 +257,7 @@ export const connectGoogleCalendar = mutation({
       provider: GOOGLE_PROVIDER,
       accountEmail: normalizeInviteEmail(args.accountEmail),
       accessToken: args.accessToken,
-      refreshToken: args.refreshToken,
+      refreshToken: args.refreshToken ?? existing?.refreshToken,
       scope: args.scope,
       tokenExpiresAt: args.tokenExpiresAt,
       status: "connected" as const,
@@ -268,14 +350,34 @@ export const updateGoogleCalendarConnectionState = internalMutation({
     lastError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.connectionId, {
-      accessToken: args.accessToken,
-      refreshToken: args.refreshToken,
-      tokenExpiresAt: args.tokenExpiresAt,
-      status: args.status,
-      lastError: args.lastError,
+    const patch: {
+      accessToken?: string;
+      refreshToken?: string;
+      tokenExpiresAt?: number;
+      status?: "connected" | "error" | "revoked";
+      lastError?: string;
+      updatedAt: number;
+    } = {
       updatedAt: Date.now(),
-    });
+    };
+
+    if (typeof args.accessToken === "string") {
+      patch.accessToken = args.accessToken;
+    }
+    if (typeof args.refreshToken === "string") {
+      patch.refreshToken = args.refreshToken;
+    }
+    if (typeof args.tokenExpiresAt === "number") {
+      patch.tokenExpiresAt = args.tokenExpiresAt;
+    }
+    if (args.status) {
+      patch.status = args.status;
+    }
+    if (typeof args.lastError === "string") {
+      patch.lastError = args.lastError;
+    }
+
+    await ctx.db.patch(args.connectionId, patch);
   },
 });
 
@@ -318,8 +420,32 @@ export const syncMeetingToGoogleCalendar = internalAction({
 
     const { meeting, attendeeEmails } = syncContext;
     let connection = syncContext.connection;
+    const publicAppUrl = getPublicAppUrl();
+
+    console.info("[google-calendar] Starting meeting sync", {
+      meetingId: args.meetingId,
+      meetingTitle: meeting.title,
+      syncRequested: meeting.googleCalendarSyncRequested ?? false,
+      existingEventId: meeting.googleCalendarEventId ?? null,
+      scheduledFor: formatLogTimestamp(meeting.scheduledFor),
+      scheduledEndsAt: formatLogTimestamp(meeting.scheduledEndsAt),
+      scheduledTimeZone: meeting.scheduledTimeZone ?? "UTC",
+      attendeeCount: attendeeEmails.length,
+      connectionStatus: connection?.status ?? null,
+      connectionAccountEmail: connection?.accountEmail ?? null,
+      connectionTokenExpiresAt: formatLogTimestamp(connection?.tokenExpiresAt),
+      hasRefreshToken: Boolean(connection?.refreshToken),
+      hasGoogleClientId: Boolean(process.env.GOOGLE_CLIENT_ID),
+      hasGoogleClientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET),
+      hasConfiguredCalendarId: Boolean(process.env.GOOGLE_CALENDAR_ID),
+      publicAppUrlConfigured: Boolean(publicAppUrl),
+      publicAppUrl: publicAppUrl ?? null,
+    });
 
     if (!meeting.scheduledFor) {
+      console.warn("[google-calendar] Skipping sync because meeting is not scheduled", {
+        meetingId: args.meetingId,
+      });
       await ctx.runMutation(
         internal.integrations.index.updateMeetingGoogleCalendarSyncState,
         {
@@ -333,6 +459,11 @@ export const syncMeetingToGoogleCalendar = internalAction({
     }
 
     if (!connection || connection.status !== "connected") {
+      console.warn("[google-calendar] Skipping sync because Google Calendar is not connected", {
+        meetingId: args.meetingId,
+        connectionStatus: connection?.status ?? null,
+        connectionAccountEmail: connection?.accountEmail ?? null,
+      });
       await ctx.runMutation(
         internal.integrations.index.updateMeetingGoogleCalendarSyncState,
         {
@@ -370,9 +501,21 @@ export const syncMeetingToGoogleCalendar = internalAction({
         };
       }
 
-      const startDate = new Date(meeting.scheduledFor);
-      const endDate = new Date(meeting.scheduledFor + 60 * 60 * 1000);
+      const timeZone = meeting.scheduledTimeZone ?? "UTC";
+      const scheduledEndsAt = resolveScheduledEndsAt(
+        meeting.scheduledFor,
+        meeting.scheduledEndsAt,
+      );
       const joinUrl = getMeetingJoinUrl(meeting._id);
+      if (!joinUrl) {
+        console.warn(
+          "[google-calendar] Public app URL is missing. Creating the event without a join link.",
+          {
+            meetingId: args.meetingId,
+            publicAppUrlConfigured: Boolean(publicAppUrl),
+          },
+        );
+      }
       const eventPayload = {
         summary: meeting.title,
         description: buildGoogleEventDescription({
@@ -389,12 +532,18 @@ export const syncMeetingToGoogleCalendar = internalAction({
             }
           : undefined,
         start: {
-          dateTime: startDate.toISOString(),
-          timeZone: meeting.scheduledTimeZone ?? "UTC",
+          dateTime: formatCalendarDateTimeInTimeZone(
+            meeting.scheduledFor,
+            timeZone,
+          ),
+          timeZone,
         },
         end: {
-          dateTime: endDate.toISOString(),
-          timeZone: meeting.scheduledTimeZone ?? "UTC",
+          dateTime: formatCalendarDateTimeInTimeZone(
+            scheduledEndsAt,
+            timeZone,
+          ),
+          timeZone,
         },
         attendees: attendeeEmails.map((email) => ({ email })),
         guestsCanInviteOthers: false,
@@ -405,6 +554,14 @@ export const syncMeetingToGoogleCalendar = internalAction({
         ? `https://www.googleapis.com/calendar/v3/calendars/primary/events/${meeting.googleCalendarEventId}`
         : "https://www.googleapis.com/calendar/v3/calendars/primary/events";
       const method = meeting.googleCalendarEventId ? "PATCH" : "POST";
+
+      console.info("[google-calendar] Sending event request", {
+        meetingId: args.meetingId,
+        method,
+        endpoint,
+        attendeeCount: attendeeEmails.length,
+        hasJoinUrl: Boolean(joinUrl),
+      });
 
       const response = await fetch(endpoint, {
         method,
@@ -430,8 +587,19 @@ export const syncMeetingToGoogleCalendar = internalAction({
           };
 
       if (!response.ok || !("id" in payload) || !payload.id) {
+        console.error("[google-calendar] Event sync failed", {
+          meetingId: args.meetingId,
+          status: response.status,
+          error: payload.error?.message ?? "Unable to sync Google Calendar event",
+        });
         throw new Error(payload.error?.message ?? "Unable to sync Google Calendar event");
       }
+
+      console.info("[google-calendar] Event sync succeeded", {
+        meetingId: args.meetingId,
+        eventId: payload.id,
+        eventUrl: payload.htmlLink ?? null,
+      });
 
       await ctx.runMutation(
         internal.integrations.index.updateMeetingGoogleCalendarSyncState,
@@ -450,7 +618,13 @@ export const syncMeetingToGoogleCalendar = internalAction({
       const message =
         error instanceof Error ? error.message : "Unable to sync Google Calendar";
 
-      if (connection?._id) {
+      console.error("[google-calendar] Meeting sync failed", {
+        meetingId: args.meetingId,
+        connectionId: connection?._id ?? null,
+        error: message,
+      });
+
+      if (connection?._id && isGoogleCalendarAuthError(message)) {
         await ctx.runMutation(
           internal.integrations.index.updateGoogleCalendarConnectionState,
           {

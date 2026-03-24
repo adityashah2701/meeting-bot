@@ -57,6 +57,7 @@ export default defineSchema({
     isLocked: v.boolean(),
     settings: meetingSettingsValidator,
     scheduledFor: v.optional(v.number()),
+    scheduledEndsAt: v.optional(v.number()),
     scheduledTimeZone: v.optional(v.string()),
     startedAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),

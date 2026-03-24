@@ -119,6 +119,13 @@ export async function GET(request: Request) {
     !("access_token" in tokenPayload) ||
     !tokenPayload.access_token
   ) {
+    console.error("[google-calendar] OAuth token exchange failed", {
+      status: tokenResponse.status,
+      error:
+        "error_description" in tokenPayload && tokenPayload.error_description
+          ? tokenPayload.error_description
+          : "Unable to exchange the Google authorization code",
+    });
     return NextResponse.redirect(
       new URL(`${returnTo}?googleCalendar=token-error`, request.url),
     );
@@ -144,10 +151,23 @@ export async function GET(request: Request) {
     !("email" in profilePayload) ||
     !profilePayload.email
   ) {
+    console.error("[google-calendar] Unable to load Google profile", {
+      status: profileResponse.status,
+      error: "error" in profilePayload ? profilePayload.error?.message : undefined,
+    });
     return NextResponse.redirect(
       new URL(`${returnTo}?googleCalendar=profile-error`, request.url),
     );
   }
+
+  console.info("[google-calendar] OAuth callback succeeded", {
+    accountEmail: profilePayload.email,
+    hasRefreshToken: Boolean(tokenPayload.refresh_token),
+    tokenExpiresAt: new Date(
+      Date.now() + Math.max(tokenPayload.expires_in ?? 3600, 60) * 1000,
+    ).toISOString(),
+    scopeCount: tokenPayload.scope?.split(" ").filter(Boolean).length ?? 0,
+  });
 
   const convex = new ConvexHttpClient(convexUrl);
   convex.setAuth(convexToken);

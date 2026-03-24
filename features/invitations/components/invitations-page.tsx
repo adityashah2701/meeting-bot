@@ -6,7 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useOrganization } from "@clerk/nextjs";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, CheckCircle2, Clock3, Inbox, Users, XCircle } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock3, Download, Inbox, Users, XCircle } from "lucide-react";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -202,6 +202,29 @@ export function InvitationsPage() {
                     ) : null}
                   </div>
                 </div>
+
+                {invite.calendarLinks ? (
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-border/70 pt-4">
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={invite.calendarLinks.google} target="_blank">
+                        <CalendarDays className="mr-2 h-4 w-4" />
+                        Google Calendar
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={invite.calendarLinks.outlook} target="_blank">
+                        <CalendarDays className="mr-2 h-4 w-4" />
+                        Outlook
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={invite.calendarLinks.ics}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Download ICS
+                      </Link>
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ))
           )}

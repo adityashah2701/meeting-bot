@@ -143,7 +143,15 @@ export function IntegrationsPage() {
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  Token state
+                  Access token expires
+                </p>
+                <p className="text-sm text-foreground">
+                  {formatTimestamp(googleCalendarConnection.tokenExpiresAt)}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  Connection state
                 </p>
                 <p className="text-sm text-foreground">
                   {googleCalendarConnection.status ?? "disconnected"}
@@ -151,6 +159,11 @@ export function IntegrationsPage() {
                 {googleCalendarConnection.lastError ? (
                   <p className="text-xs text-destructive">
                     {googleCalendarConnection.lastError}
+                  </p>
+                ) : null}
+                {googleCalendarConnection.warning ? (
+                  <p className="text-xs text-amber-600">
+                    {googleCalendarConnection.warning}
                   </p>
                 ) : null}
               </div>
@@ -193,6 +206,25 @@ export function IntegrationsPage() {
                       Scopes will appear after a successful connection.
                     </p>
                   )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  Debug checks
+                </p>
+                <div className="grid gap-2 text-sm text-muted-foreground">
+                  <p>
+                    Refresh token stored: {googleCalendarConnection.hasRefreshToken ? "yes" : "no"}
+                  </p>
+                  <p>
+                    Convex Google client env: {googleCalendarConnection.hasGoogleClientId && googleCalendarConnection.hasGoogleClientSecret ? "configured" : "missing"}
+                  </p>
+                  <p>
+                    Public app URL: {googleCalendarConnection.publicAppUrlConfigured ? googleCalendarConnection.publicAppUrl : "missing"}
+                  </p>
+                  <p>
+                    Extra calendar env present: {googleCalendarConnection.hasConfiguredCalendarId ? "yes" : "no"}
+                  </p>
                 </div>
               </div>
             </div>

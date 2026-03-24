@@ -52,6 +52,7 @@ type CreateMeetingMutation = (args: {
   purpose?: string;
   description?: string;
   scheduledFor?: number;
+  scheduledEndsAt?: number;
   scheduledTimeZone?: string;
   syncWithGoogleCalendar?: boolean;
   settings?: {
@@ -100,6 +101,7 @@ export async function scheduleMeeting(
     description?: string;
     agenda?: string;
     scheduledFor: number;
+    scheduledEndsAt: number;
     scheduledTimeZone?: string;
     syncWithGoogleCalendar?: boolean;
     inviteEmails?: string[];
@@ -115,6 +117,7 @@ export async function scheduleMeeting(
     description,
     purpose: agenda || description || title,
     scheduledFor: args.scheduledFor,
+    scheduledEndsAt: args.scheduledEndsAt,
     scheduledTimeZone: args.scheduledTimeZone,
     syncWithGoogleCalendar: args.syncWithGoogleCalendar,
     inviteEmails: args.inviteEmails,

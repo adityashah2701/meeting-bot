@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { getLocalDateTimeTimestamp } from "@/lib/meeting-schedule";
 
 export function MeetingFormSchedule({
   onSubmit,
@@ -18,6 +19,7 @@ export function MeetingFormSchedule({
     description: string;
     date: string;
     time: string;
+    endTime: string;
     agenda: string;
     timeZone: string;
     syncWithGoogleCalendar: boolean;
@@ -31,11 +33,13 @@ export function MeetingFormSchedule({
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [agenda, setAgenda] = useState("");
   const [syncWithGoogleCalendar, setSyncWithGoogleCalendar] = useState(false);
   const [errors, setErrors] = useState<{
     title?: string;
     dateTime?: string;
+    endTime?: string;
   }>({});
 
   const timezone = useMemo(
@@ -49,6 +53,7 @@ export function MeetingFormSchedule({
     const nextErrors: {
       title?: string;
       dateTime?: string;
+      endTime?: string;
     } = {};
 
     if (!title.trim()) {
@@ -57,6 +62,19 @@ export function MeetingFormSchedule({
 
     if (!date || !time) {
       nextErrors.dateTime = "Date and time are required.";
+    }
+
+    if (!endTime) {
+      nextErrors.endTime = "End time is required.";
+    }
+
+    if (date && time && endTime) {
+      const startsAt = getLocalDateTimeTimestamp(date, time);
+      const endsAt = getLocalDateTimeTimestamp(date, endTime);
+
+      if (endsAt <= startsAt) {
+        nextErrors.endTime = "End time must be after the start time.";
+      }
     }
 
     setErrors(nextErrors);
@@ -69,6 +87,7 @@ export function MeetingFormSchedule({
       description,
       date,
       time,
+      endTime,
       agenda,
       timeZone: timezone,
       syncWithGoogleCalendar,
@@ -134,8 +153,27 @@ export function MeetingFormSchedule({
               if (errors.dateTime) {
                 setErrors((current) => ({ ...current, dateTime: undefined }));
               }
+              if (errors.endTime) {
+                setErrors((current) => ({ ...current, endTime: undefined }));
+              }
             }}
           />
+        </div>
+        <div className="space-y-2 sm:col-span-2">
+          <label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            End time
+          </label>
+          <Input
+            type="time"
+            value={endTime}
+            onChange={(event) => {
+              setEndTime(event.target.value);
+              if (errors.endTime) {
+                setErrors((current) => ({ ...current, endTime: undefined }));
+              }
+            }}
+          />
+          {errors.endTime ? <p className="text-xs text-destructive">{errors.endTime}</p> : null}
         </div>
       </div>
       {errors.dateTime ? <p className="text-xs text-destructive">{errors.dateTime}</p> : null}
@@ -186,7 +224,7 @@ export function MeetingFormSchedule({
 
       <Button
         className="w-full"
-        disabled={isSubmitting || !title.trim() || !date || !time}
+        disabled={isSubmitting || !title.trim() || !date || !time || !endTime}
         type="submit"
       >
         {isSubmitting ? "Scheduling..." : "Schedule Meeting"}

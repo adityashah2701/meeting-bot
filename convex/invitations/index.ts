@@ -11,6 +11,7 @@ import {
   resolveInviteStatus,
   type MeetingInviteStatus,
 } from "../lib/invitations";
+import { resolveScheduledEndsAt } from "../../lib/meeting-schedule";
 
 function invitationStatusForUser(
   invite: Pick<Doc<"meeting_invites">, "status" | "expiresAt">,
@@ -91,6 +92,13 @@ export const listMine = query({
           canJoin: meeting.status === "active" && status !== "declined" && status !== "expired",
           joinLink: `/meeting/${invite.meetingId}`,
           detailLink: `/invitations?invite=${invite._id}`,
+          calendarLinks: meeting.scheduledFor
+            ? {
+                google: `/api/invitations/${invite._id}/calendar?provider=google`,
+                outlook: `/api/invitations/${invite._id}/calendar?provider=outlook`,
+                ics: `/api/invitations/${invite._id}/calendar?provider=ics`,
+              }
+            : null,
           participantStatus: participant?.status ?? null,
         };
       }),
@@ -99,6 +107,72 @@ export const listMine = query({
     return items
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .sort((left, right) => right.createdAt - left.createdAt);
+  },
+});
+
+export const getCalendarInvite = query({
+  args: {
+    invitationId: v.id("meeting_invites"),
+    token: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const invite = await ctx.db.get(args.invitationId);
+    if (!invite) {
+      throw new Error("Invitation not found");
+    }
+
+    const status = resolveInviteStatus(invite);
+    if (status === "cancelled" || status === "expired") {
+      throw new Error("Invitation is no longer active");
+    }
+
+    let allowed = false;
+    if (args.token && invite.token && args.token === invite.token) {
+      allowed = true;
+    }
+
+    if (!allowed) {
+      const identity = await ctx.auth.getUserIdentity();
+      if (identity) {
+        const user = await getCurrentUserRecord(ctx, identity.tokenIdentifier);
+        const allowedEmail = normalizeInviteEmail(identity.email ?? user?.email ?? "");
+        const inviteEmail = normalizeInviteEmail(invite.email);
+
+        if (
+          invite.invitedUserTokenIdentifier === identity.tokenIdentifier ||
+          (!invite.invitedUserTokenIdentifier && inviteEmail === allowedEmail)
+        ) {
+          allowed = true;
+        }
+      }
+    }
+
+    if (!allowed) {
+      throw new Error("Invitation not found");
+    }
+
+    const meeting = await ctx.db.get(invite.meetingId);
+    if (!meeting) {
+      throw new Error("Meeting not found");
+    }
+
+    if (!meeting.scheduledFor) {
+      throw new Error("This meeting is not scheduled");
+    }
+
+    return {
+      invitationId: invite._id,
+      meetingId: invite.meetingId,
+      title: meeting.title,
+      purpose: meeting.purpose,
+      description: meeting.description ?? "",
+      startsAt: meeting.scheduledFor,
+      endsAt: resolveScheduledEndsAt(
+        meeting.scheduledFor,
+        meeting.scheduledEndsAt,
+      ),
+      status,
+    };
   },
 });
 

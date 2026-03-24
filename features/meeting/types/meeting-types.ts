@@ -46,6 +46,7 @@ export type MeetingRecord = {
   isLocked?: boolean;
   settings?: MeetingSettings;
   scheduledFor?: number;
+  scheduledEndsAt?: number;
   startedAt?: number;
   endedAt?: number;
   activeParticipants?: number;

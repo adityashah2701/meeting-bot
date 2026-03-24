@@ -2,7 +2,7 @@ import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { internal } from "../_generated/api";
+import { api, internal } from "../_generated/api";
 import {
   assertMeetingAccess,
   assertMeetingHost,
@@ -32,8 +32,14 @@ import {
   normalizeInviteEmailList,
   resolveInviteStatus,
 } from "../lib/invitations";
+import { formatMeetingTimeRange } from "../../lib/meeting-schedule";
+import { buildPublicAppUrl } from "../../lib/public-app-url";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function createInviteAccessToken() {
+  return crypto.randomUUID().replace(/-/g, "");
+}
 
 async function insertAuditLog(
   ctx: MutationCtx,
@@ -121,6 +127,9 @@ async function deliverInvite(
     inviterName: string;
     email: string;
     scheduledFor?: number;
+    scheduledEndsAt?: number;
+    scheduledTimeZone?: string;
+    inviteToken: string;
   },
 ) {
   const invitedUser = await getUserRecordByEmail(ctx, args.email);
@@ -141,11 +150,18 @@ async function deliverInvite(
     emailDeliveryStatus:
       process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL
         ? "pending"
-        : "skipped",
+        : "failed",
+    lastEmailError:
+      process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL
+        ? undefined
+        : "Invite email is not configured in Convex. Add RESEND_API_KEY and INVITATION_FROM_EMAIL to the deployment environment.",
   });
 
   const organizationName = await getOrganizationName(ctx, args.orgId);
-  const appBaseUrl = process.env.APP_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const meetingLink = buildPublicAppUrl(`/invitations?invite=${args.inviteId}`);
+  const calendarBaseUrl = buildPublicAppUrl(
+    `/api/invitations/${args.inviteId}/calendar`,
+  );
   if (process.env.RESEND_API_KEY && process.env.INVITATION_FROM_EMAIL) {
     await ctx.scheduler.runAfter(0, internal.invitationsDelivery.sendMeetingInviteEmail, {
       inviteId: args.inviteId,
@@ -153,8 +169,20 @@ async function deliverInvite(
       meetingTitle: args.meetingTitle,
       organizerName: args.inviterName,
       organizationName,
-      meetingLink: `${appBaseUrl}/invitations?invite=${args.inviteId}`,
+      meetingLink: meetingLink ?? undefined,
       scheduledFor: args.scheduledFor,
+      scheduledEndsAt: args.scheduledEndsAt,
+      scheduledTimeZone: args.scheduledTimeZone,
+      scheduledLabel:
+        typeof args.scheduledFor === "number" && typeof args.scheduledEndsAt === "number"
+          ? formatMeetingTimeRange(
+              args.scheduledFor,
+              args.scheduledEndsAt,
+              args.scheduledTimeZone,
+            )
+          : undefined,
+      calendarBaseUrl: calendarBaseUrl ?? undefined,
+      inviteToken: args.inviteToken,
     });
   }
 }
@@ -197,6 +225,7 @@ export const create = mutation({
     purpose: v.optional(v.string()),
     description: v.optional(v.string()),
     scheduledFor: v.optional(v.number()),
+    scheduledEndsAt: v.optional(v.number()),
     scheduledTimeZone: v.optional(v.string()),
     syncWithGoogleCalendar: v.optional(v.boolean()),
     settings: v.optional(meetingSettingsValidator),
@@ -212,21 +241,25 @@ export const create = mutation({
     const shouldSyncWithGoogleCalendar =
       isScheduled && args.syncWithGoogleCalendar === true;
 
+    if (
+      typeof args.scheduledFor === "number" &&
+      typeof args.scheduledEndsAt === "number" &&
+      args.scheduledEndsAt <= args.scheduledFor
+    ) {
+      throw new Error("Meeting end time must be after the start time");
+    }
+
     if (args.syncWithGoogleCalendar && !isScheduled) {
       throw new Error("Google Calendar sync is only available for scheduled meetings");
     }
 
     if (shouldSyncWithGoogleCalendar) {
-      const googleCalendarConnection = await ctx.db
-        .query("user_integrations")
-        .withIndex("by_userTokenIdentifier_and_provider", (q) =>
-          q
-            .eq("userTokenIdentifier", identity.tokenIdentifier)
-            .eq("provider", "google_calendar"),
-        )
-        .unique();
+      const googleCalendarConnection = await ctx.runQuery(
+        api.integrations.index.getGoogleCalendarConnection,
+        { orgId: args.orgId },
+      );
 
-      if (!googleCalendarConnection || googleCalendarConnection.status !== "connected") {
+      if (!googleCalendarConnection?.connected) {
         throw new Error("Connect Google Calendar before enabling calendar sync");
       }
     }
@@ -245,6 +278,7 @@ export const create = mutation({
       isLocked: false,
       settings,
       scheduledFor: args.scheduledFor,
+      scheduledEndsAt: args.scheduledEndsAt,
       scheduledTimeZone: args.scheduledTimeZone,
       startedAt: isScheduled ? undefined : now,
       googleCalendarSyncRequested: shouldSyncWithGoogleCalendar || undefined,
@@ -284,6 +318,7 @@ export const create = mutation({
     const inviteEmails = normalizeInviteEmailList(args.inviteEmails ?? []);
 
     for (const email of inviteEmails) {
+      const inviteToken = createInviteAccessToken();
       const inviteId = await ctx.db.insert("meeting_invites", {
         meetingId,
         orgId: args.orgId,
@@ -292,6 +327,7 @@ export const create = mutation({
         role: "participant",
         invitedByTokenIdentifier: identity.tokenIdentifier,
         invitedByName: getIdentityName(identity),
+        token: inviteToken,
         status: "pending",
         expiresAt: now + INVITE_TTL_MS,
         lastSentAt: now,
@@ -314,6 +350,9 @@ export const create = mutation({
         inviterName: getIdentityName(identity),
         email,
         scheduledFor: args.scheduledFor,
+        scheduledEndsAt: args.scheduledEndsAt,
+        scheduledTimeZone: args.scheduledTimeZone,
+        inviteToken,
       });
     }
 
@@ -512,11 +551,14 @@ export const inviteParticipants = mutation({
           continue;
         }
 
+        const inviteToken = existing.token ?? createInviteAccessToken();
+
         await ctx.db.patch(existing._id, {
           role,
           invitedUserTokenIdentifier: existing.invitedUserTokenIdentifier,
           invitedByTokenIdentifier: identity.tokenIdentifier,
           invitedByName: getIdentityName(identity),
+          token: inviteToken,
           status: "pending",
           expiresAt: now + INVITE_TTL_MS,
           lastSentAt: now,
@@ -537,11 +579,15 @@ export const inviteParticipants = mutation({
           inviterName: participant?.name ?? getIdentityName(identity),
           email,
           scheduledFor: meeting.scheduledFor,
+          scheduledEndsAt: meeting.scheduledEndsAt,
+          scheduledTimeZone: meeting.scheduledTimeZone,
+          inviteToken,
         });
         inserted.push(email);
         continue;
       }
 
+      const inviteToken = createInviteAccessToken();
       const inviteId = await ctx.db.insert("meeting_invites", {
         meetingId: args.meetingId,
         orgId: meeting.orgId,
@@ -550,6 +596,7 @@ export const inviteParticipants = mutation({
         role,
         invitedByTokenIdentifier: identity.tokenIdentifier,
         invitedByName: participant?.name ?? getIdentityName(identity),
+        token: inviteToken,
         status: "pending",
         expiresAt: now + INVITE_TTL_MS,
         lastSentAt: now,
@@ -571,6 +618,9 @@ export const inviteParticipants = mutation({
         inviterName: participant?.name ?? getIdentityName(identity),
         email,
         scheduledFor: meeting.scheduledFor,
+        scheduledEndsAt: meeting.scheduledEndsAt,
+        scheduledTimeZone: meeting.scheduledTimeZone,
+        inviteToken,
       });
       inserted.push(email);
     }
@@ -647,7 +697,9 @@ export const resendInvite = mutation({
     }
 
     const now = Date.now();
+    const inviteToken = invite.token ?? createInviteAccessToken();
     await ctx.db.patch(args.inviteId, {
+      token: inviteToken,
       status: "pending",
       expiresAt: now + INVITE_TTL_MS,
       lastSentAt: now,
@@ -667,6 +719,9 @@ export const resendInvite = mutation({
       inviterName: participant?.name ?? getIdentityName(identity),
       email: invite.email,
       scheduledFor: meeting.scheduledFor,
+      scheduledEndsAt: meeting.scheduledEndsAt,
+      scheduledTimeZone: meeting.scheduledTimeZone,
+      inviteToken,
     });
 
     await insertAuditLog(ctx, {
