@@ -1,13 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useDeferredValue, useState } from "react";
 import { useOrganization } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import {
   CalendarDays,
   CheckCircle2,
-  ExternalLink,
   FileText,
   ListChecks,
   Search,
@@ -15,9 +13,9 @@ import {
 import { EmptyState } from "@/components/shared/empty-state";
 import { LoadingBlock } from "@/components/shared/loading-block";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SendMinutesEmailDialog } from "@/features/meeting/components/send-minutes-email-dialog";
 import { meetingService } from "@/features/meeting/services/meeting-service";
 import { DownloadMinutesButton } from "@/features/meeting/components/download-minutes-button";
 import {
@@ -261,12 +259,11 @@ export function MinutesOfMeetingsPage() {
                       size="sm"
                       variant="outline"
                     />
-                    <Button asChild size="sm">
-                      <Link href={`/meeting/${meeting._id}/details`}>
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open details
-                      </Link>
-                    </Button>
+                    <SendMinutesEmailDialog
+                      meeting={toMinutesDocument(meeting)}
+                      organizationId={organization?.id}
+                      size="sm"
+                    />
                   </div>
                 </div>
               </div>
