@@ -33,6 +33,8 @@ import { ParticipantGrid } from "@/features/webrtc/components/participant-grid";
 import { MeetingControls } from "@/features/webrtc/components/meeting-controls";
 import { MeetingSidePanel } from "@/features/meeting/components/meeting-side-panel";
 import { MeetingWhiteboard } from "@/features/meeting/components/meeting-whiteboard";
+import { MeetingReactionsOverlay } from "@/features/meeting/components/meeting-reactions-overlay";
+import type { MeetingReactionEmoji } from "@/features/meeting/lib/reactions";
 
 const AUTO_SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const TRANSCRIPTION_MODE_STORAGE_KEY = "meeting-bot-transcription-mode";
@@ -129,6 +131,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const generateRecordingUploadUrl = useMutation(meetingService.generateRecordingUploadUrl);
   const markRecordingReady = useMutation(meetingService.markRecordingReady);
   const markRecordingFailed = useMutation(meetingService.markRecordingFailed);
+  const sendReaction = useMutation(meetingService.sendReaction);
 
   const [interimTranscript, setInterimTranscript] = useState<TranscriptLine | null>(null);
   const [queuedTranscriptLines, setQueuedTranscriptLines] = useState<TranscriptLine[]>([]);
@@ -178,6 +181,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     startScreenShare,
     stopScreenShare,
   } = useWebrtc(meetingId);
+  const liveReactions = useQuery(
+    meetingService.listReactions,
+    participantStatus === "joined" || meeting?.currentParticipant?.status === "joined"
+      ? { meetingId }
+      : "skip",
+  );
 
   const transcript = useMemo(() => {
     const persisted = dbTranscript.map((entry) => ({
@@ -310,6 +319,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const canUseWhiteboard = isJoined && Boolean(meeting.effectivePermissions?.canUseWhiteboard);
   const showMeetingLockBanner = isJoined && meeting.isLocked;
   const isWhiteboardOpen = Boolean(whiteboard?.isOpen);
+  const canReact = isJoined && Boolean(meeting.settings.allowReactions);
   const hasActivePresentation =
     isScreenSharing || participants.some((participant) => participant.isScreenSharing);
   const whiteboardOwnerLabel = whiteboard?.updatedByName?.trim() || "Someone";
@@ -729,6 +739,16 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     }
   };
 
+  const handleSendReaction = async (emoji: MeetingReactionEmoji) => {
+    try {
+      await sendReaction({ meetingId, emoji });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to send reaction",
+      );
+    }
+  };
+
   return (
     <div ref={meetingCaptureRootRef} className="flex h-screen flex-col overflow-hidden bg-background">
       {/* ── Header ── */}
@@ -1060,68 +1080,73 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
                   <span>The meeting is locked. New participants cannot join until a host unlocks it.</span>
                 </div>
               ) : null}
-              <ParticipantGrid
-                localStream={localStream}
-                cameraStream={cameraStream}
-                presentationStream={presentationStream}
-                remoteCameraStreams={remoteCameraStreams}
-                remotePresentationStreams={remotePresentationStreams}
-                participants={participants}
-                localParticipantId={participantId}
-                pinnedParticipantId={pinnedParticipantId}
-                focusMode={focusMode}
-                compactRail={compactRail}
-                stage={
-                  isWhiteboardOpen && !hasActivePresentation ? (
-                    <div className="flex h-full min-h-0 flex-col bg-white">
-                      <div className="flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-2.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm">
-                            <PenSquare className="h-3.5 w-3.5 text-primary" />
-                            Shared whiteboard
+              <div className="relative h-full min-h-0">
+                <ParticipantGrid
+                  localStream={localStream}
+                  cameraStream={cameraStream}
+                  presentationStream={presentationStream}
+                  remoteCameraStreams={remoteCameraStreams}
+                  remotePresentationStreams={remotePresentationStreams}
+                  participants={participants}
+                  localParticipantId={participantId}
+                  pinnedParticipantId={pinnedParticipantId}
+                  focusMode={focusMode}
+                  compactRail={compactRail}
+                  stage={
+                    isWhiteboardOpen && !hasActivePresentation ? (
+                      <div className="flex h-full min-h-0 flex-col bg-white">
+                        <div className="flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-2.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm">
+                              <PenSquare className="h-3.5 w-3.5 text-primary" />
+                              Shared whiteboard
+                            </div>
+                            <div className="inline-flex items-center rounded-full bg-primary/8 px-3 py-1 text-xs text-muted-foreground">
+                              Live for everyone · opened by {whiteboardOwnerLabel}
+                            </div>
                           </div>
-                          <div className="inline-flex items-center rounded-full bg-primary/8 px-3 py-1 text-xs text-muted-foreground">
-                            Live for everyone · opened by {whiteboardOwnerLabel}
-                          </div>
+                          {canUseWhiteboard ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5 rounded-full text-xs"
+                              onClick={() => {
+                                void setWhiteboardOpen({ meetingId, isOpen: false }).catch((error) => {
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Unable to close whiteboard",
+                                  );
+                                });
+                              }}
+                            >
+                              <PenSquare className="h-3.5 w-3.5" />
+                              Close
+                            </Button>
+                          ) : null}
                         </div>
-                        {canUseWhiteboard ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5 rounded-full text-xs"
-                            onClick={() => {
-                              void setWhiteboardOpen({ meetingId, isOpen: false }).catch((error) => {
-                                toast.error(
-                                  error instanceof Error
-                                    ? error.message
-                                    : "Unable to close whiteboard",
-                                );
-                              });
+                        <div className="min-h-0 flex-1">
+                          <MeetingWhiteboard
+                            meetingId={meetingId}
+                            canEdit={canUseWhiteboard}
+                            serializedScene={whiteboard?.scene ?? null}
+                            onSaveScene={async (scene) => {
+                              try {
+                                await saveWhiteboardScene({ meetingId, scene });
+                              } catch (error) {
+                                console.error("Unable to sync whiteboard", error);
+                              }
                             }}
-                          >
-                            <PenSquare className="h-3.5 w-3.5" />
-                            Close
-                          </Button>
-                        ) : null}
+                          />
+                        </div>
                       </div>
-                      <div className="min-h-0 flex-1">
-                        <MeetingWhiteboard
-                          meetingId={meetingId}
-                          canEdit={canUseWhiteboard}
-                          serializedScene={whiteboard?.scene ?? null}
-                          onSaveScene={async (scene) => {
-                            try {
-                              await saveWhiteboardScene({ meetingId, scene });
-                            } catch (error) {
-                              console.error("Unable to sync whiteboard", error);
-                            }
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ) : undefined
-                }
-              />
+                    ) : undefined
+                  }
+                />
+                {isJoined ? (
+                  <MeetingReactionsOverlay reactions={liveReactions ?? []} />
+                ) : null}
+              </div>
             </div>
           )}
         </div>
@@ -1162,9 +1187,11 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
             canToggleAudio={canToggleAudio}
             canToggleVideo={canToggleVideo}
             canShareScreen={canShareScreen}
+            canReact={canReact}
             onToggleAudio={() => void toggleAudio()}
             onToggleVideo={() => void toggleVideo()}
             onToggleScreenShare={() => void (isScreenSharing ? stopScreenShare() : startScreenShare())}
+            onSendReaction={(emoji) => void handleSendReaction(emoji)}
             onLeave={() => void handleLeave()}
             onEndMeeting={() => void handleEndMeeting()}
           />

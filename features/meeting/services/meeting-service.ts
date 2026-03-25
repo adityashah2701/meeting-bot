@@ -29,6 +29,8 @@ export const meetingService = {
   exportMeetingToNotion: api.integrations.index.exportMeetingToNotion,
   saveChunk: api.meetings.summaryChunks.saveChunk,
   listChunks: api.meetings.summaryChunks.listChunks,
+  listReactions: api.reactions.index.listByMeeting,
+  sendReaction: api.reactions.index.send,
   listParticipants: api.participants.index.list,
   listWaitingRoom: api.participants.index.listWaitingRoom,
   joinMeeting: api.participants.index.join,

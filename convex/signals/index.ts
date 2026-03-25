@@ -19,7 +19,7 @@ export const listForParticipant = query({
       participant.userTokenIdentifier !== identity.tokenIdentifier ||
       participant.status !== "joined"
     ) {
-      throw new Error("Forbidden");
+      return [];
     }
 
     return await ctx.db

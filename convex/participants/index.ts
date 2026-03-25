@@ -394,7 +394,14 @@ export const list = query({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
-    await requireJoinedParticipant(ctx, args.meetingId, identity.tokenIdentifier);
+    const participant = await getMeetingParticipant(
+      ctx,
+      args.meetingId,
+      identity.tokenIdentifier,
+    );
+    if (!participant || participant.status !== "joined") {
+      return [];
+    }
     return await listMeetingParticipantsByStatus(ctx, args.meetingId, "joined");
   },
 });

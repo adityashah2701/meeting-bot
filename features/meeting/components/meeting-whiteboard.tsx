@@ -2,7 +2,6 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { serializeAsJSON } from "@excalidraw/excalidraw";
 import type {
   AppState,
   BinaryFiles,
@@ -21,6 +20,24 @@ const ExcalidrawCanvas = dynamic(
 );
 
 const WHITEBOARD_SAVE_DEBOUNCE_MS = 800;
+let serializeAsJSONPromise: Promise<
+  typeof import("@excalidraw/excalidraw")["serializeAsJSON"]
+> | null = null;
+
+async function serializeScene(
+  elements: Parameters<NonNullable<ExcalidrawProps["onChange"]>>[0],
+  appState: AppState,
+  files: BinaryFiles,
+) {
+  if (!serializeAsJSONPromise) {
+    serializeAsJSONPromise = import("@excalidraw/excalidraw").then(
+      (mod) => mod.serializeAsJSON,
+    );
+  }
+
+  const serializeAsJSON = await serializeAsJSONPromise;
+  return serializeAsJSON(elements, appState, files, "database");
+}
 
 function parseInitialScene(
   serializedScene: string | null | undefined,
@@ -118,20 +135,21 @@ export function MeetingWhiteboard({
       return;
     }
 
-    const nextScene = serializeAsJSON(elements, appState, files, "database");
-    if (nextScene === lastQueuedSceneRef.current) {
-      return;
-    }
+    void serializeScene(elements, appState, files).then((nextScene) => {
+      if (nextScene === lastQueuedSceneRef.current) {
+        return;
+      }
 
-    lastQueuedSceneRef.current = nextScene;
+      lastQueuedSceneRef.current = nextScene;
 
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current);
-    }
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
 
-    saveTimerRef.current = window.setTimeout(() => {
-      void onSaveScene(nextScene);
-    }, WHITEBOARD_SAVE_DEBOUNCE_MS);
+      saveTimerRef.current = window.setTimeout(() => {
+        void onSaveScene(nextScene);
+      }, WHITEBOARD_SAVE_DEBOUNCE_MS);
+    });
   };
 
   return (

@@ -290,6 +290,23 @@ export default defineSchema({
     .index("by_receiverParticipantId_and_createdAt", ["receiverParticipantId", "createdAt"])
     .index("by_meetingId_and_createdAt", ["meetingId", "createdAt"]),
 
+  meeting_reactions: defineTable({
+    meetingId: v.id("meetings"),
+    senderParticipantId: v.id("meeting_participants"),
+    senderName: v.string(),
+    emoji: v.union(
+      v.literal("👍"),
+      v.literal("❤️"),
+      v.literal("👏"),
+      v.literal("🎉"),
+      v.literal("😂"),
+      v.literal("😮"),
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_meetingId_and_createdAt", ["meetingId", "createdAt"])
+    .index("by_senderParticipantId_and_createdAt", ["senderParticipantId", "createdAt"]),
+
   tasks: defineTable({
     orgId: v.string(),
     meetingId: v.optional(v.id("meetings")),
