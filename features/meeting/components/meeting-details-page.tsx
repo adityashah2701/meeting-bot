@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import ReactMarkdown from "react-markdown";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LoadingBlock } from "@/components/shared/loading-block";
@@ -15,7 +15,6 @@ import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-or
 import { billingService } from "@/features/billing/services/billing-service";
 import { DownloadMinutesButton } from "@/features/meeting/components/download-minutes-button";
 import { meetingService } from "@/features/meeting/services/meeting-service";
-import { TaskBoard } from "@/features/tasks/components/task-board";
 import { taskService } from "@/features/tasks/services/task-service";
 import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video, BookText, ExternalLink, ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -71,12 +70,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
     { meetingId },
   );
   const exportMeetingToNotion = useAction(meetingService.exportMeetingToNotion);
-  const updateTask = useMutation(taskService.updateTask);
   const meetingTasks = useQuery(taskService.listMeetingTasks, { meetingId });
-  const taskMembers = useQuery(
-    taskService.listOrgMembers,
-    meeting?.orgId ? { orgId: meeting.orgId } : "skip",
-  );
   const [activeRecordingId, setActiveRecordingId] = useState<string | null>(null);
   const [activeRecordingTime, setActiveRecordingTime] = useState(0);
   const [isExportingToNotion, setIsExportingToNotion] = useState(false);
@@ -86,7 +80,6 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
     || transcripts === undefined
     || recordings === undefined
     || meetingTasks === undefined
-    || (meeting?.orgId ? taskMembers === undefined : false)
   ) {
     return <LoadingBlock className="h-96 w-full" />;
   }
@@ -115,7 +108,8 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
         : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30";
 
   const hasSummary = Boolean(meeting.summary);
-  const hasActionItems = (meeting.action_items && meeting.action_items.length > 0)
+  const hasActionItems =
+    (meeting.action_items && meeting.action_items.length > 0)
     || meetingTasks.length > 0;
   const hasKeyPoints = meeting.key_points && meeting.key_points.length > 0;
   const hasDecisions = meeting.decisions && meeting.decisions.length > 0;
@@ -397,9 +391,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                     {/* Overview */}
                     {meeting.summary && (
                       <div>
-                        <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-                          Overview
-                        </p>
+                      
                         <div className="prose-sm max-w-none text-[14px] leading-relaxed text-foreground/85">
                           <ReactMarkdown
                             components={{
@@ -463,7 +455,64 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                       </div>
                     )}
 
-                 
+                    {/* Action Items */}
+                    {hasActionItems && (
+                      <div>
+                        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+                          Action Items
+                        </p>
+                        <div className="space-y-2">
+                          {(meetingTasks.length > 0
+                            ? meetingTasks.map((task) => ({
+                                task: task.title,
+                                assignee: task.assigneeName ?? null,
+                                due: null,
+                                status: task.status,
+                              }))
+                            : meeting.action_items!
+                          ).map(
+                            (
+                              item: {
+                                task: string;
+                                assignee?: string | null;
+                                due?: string | null;
+                                status?: "open" | "in_progress" | "done";
+                              },
+                              i: number,
+                            ) => (
+                              <div
+                                key={i}
+                                className="rounded-lg border border-border bg-muted/20 px-3 py-2.5"
+                              >
+                                <p className="text-[14px] font-medium text-foreground/90">{item.task}</p>
+                                {(item.assignee || item.due || item.status) && (
+                                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {item.status && (
+                                      <Badge variant="outline" className="h-5 px-2 text-[11px]">
+                                        {item.status.replace("_", " ")}
+                                      </Badge>
+                                    )}
+                                    {item.assignee && (
+                                      <Badge variant="secondary" className="h-5 px-2 text-[11px]">
+                                        {item.assignee}
+                                      </Badge>
+                                    )}
+                                    {item.due && (
+                                      <Badge
+                                        variant="outline"
+                                        className="h-5 border-border/50 px-2 text-[11px] text-muted-foreground"
+                                      >
+                                        {item.due}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </ScrollArea>
