@@ -383,9 +383,7 @@ function buildMetaTable(data: MinutesDocumentData) {
           spacingAfter: 40,
         }),
         paragraph(formatDate(updatedTimestamp), { spacingAfter: 40 }),
-      ], 9000),
-    ]),
-    tableRow([
+      ], 4500),
       tableCell([
         paragraph("Purpose", {
           bold: true,
@@ -395,7 +393,7 @@ function buildMetaTable(data: MinutesDocumentData) {
           spacingAfter: 40,
         }),
         paragraph(toDisplayText(data.purpose), { spacingAfter: 40 }),
-      ], 9000),
+      ], 4500),
     ]),
   ];
 
@@ -403,6 +401,7 @@ function buildMetaTable(data: MinutesDocumentData) {
     <w:tbl>
       <w:tblPr>
         <w:tblW w:w="0" w:type="auto"/>
+        <w:tblLayout w:type="fixed"/>
         <w:tblBorders>
           <w:top w:val="single" w:sz="8" w:space="0" w:color="D1D5DB"/>
           <w:left w:val="single" w:sz="8" w:space="0" w:color="D1D5DB"/>
@@ -412,6 +411,10 @@ function buildMetaTable(data: MinutesDocumentData) {
           <w:insideV w:val="single" w:sz="8" w:space="0" w:color="D1D5DB"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="4500"/>
+        <w:gridCol w:w="4500"/>
+      </w:tblGrid>
       ${rows.join("")}
     </w:tbl>
   `;
