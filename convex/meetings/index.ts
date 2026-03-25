@@ -1045,6 +1045,71 @@ export const getByOrg = query({
   },
 });
 
+export const getMinutesByOrg = query({
+  args: { orgId: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+
+    const meetings = await ctx.db
+      .query("meetings")
+      .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
+      .order("desc")
+      .take(200);
+
+    const minutes: Array<{
+      _id: Id<"meetings">;
+      _creationTime: number;
+      orgId: string;
+      title: string;
+      purpose: string;
+      status: "scheduled" | "active" | "ended";
+      scheduledFor: number | null;
+      endedAt: number | null;
+      summary: string;
+      key_points: string[];
+      decisions: string[];
+      action_items: Array<{
+        task: string;
+        assignee: string | null;
+        due: string | null;
+      }>;
+      summaryUpdatedAt: number;
+    }> = [];
+
+    for (const meeting of meetings) {
+      const summaryAsset = await ctx.db
+        .query("meeting_assets")
+        .withIndex("by_meetingId_and_type", (q) =>
+          q.eq("meetingId", meeting._id).eq("type", "summary"),
+        )
+        .unique();
+
+      if (!summaryAsset?.content?.trim()) {
+        continue;
+      }
+
+      minutes.push({
+        _id: meeting._id,
+        _creationTime: meeting._creationTime,
+        orgId: meeting.orgId,
+        title: meeting.title,
+        purpose: meeting.purpose,
+        status: meeting.status,
+        scheduledFor: meeting.scheduledFor ?? null,
+        endedAt: meeting.endedAt ?? null,
+        summary: summaryAsset.content,
+        key_points: summaryAsset.key_points ?? [],
+        decisions: summaryAsset.decisions ?? [],
+        action_items: summaryAsset.action_items ?? [],
+        summaryUpdatedAt: summaryAsset.updatedAt,
+      });
+    }
+
+    return minutes;
+  },
+});
+
 export const getDashboardFeed = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {

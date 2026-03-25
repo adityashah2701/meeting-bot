@@ -4,6 +4,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 export const meetingService = {
   createMeeting: api.meetings.index.create,
   getMeetings: api.meetings.index.getByOrg,
+  getMinutesByOrg: api.meetings.index.getMinutesByOrg,
   getMeeting: api.meetings.index.get,
   endMeeting: api.meetings.index.endMeeting,
   updateMeetingSettings: api.meetings.index.updateSettings,

@@ -13,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
 import { billingService } from "@/features/billing/services/billing-service";
+import { DownloadMinutesButton } from "@/features/meeting/components/download-minutes-button";
 import { meetingService } from "@/features/meeting/services/meeting-service";
 import { Sparkles, MessageSquare, CalendarDays, Clock, CheckCircle2, Video, BookText, ExternalLink, ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -174,15 +175,33 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
               <span>{recordings.length} recording{recordings.length !== 1 ? "s" : ""}</span>
             </div>
             {hasSummary && (
-              <div className="">
-                
-              </div>
+              <Badge className="border-primary/20 bg-primary/10 text-primary">
+                Email-ready MoM available
+              </Badge>
             )}
           </div>
         </div>
 
         {/* Notion export bar */}
         <div className="flex flex-wrap items-center gap-3 border-t border-border/60 bg-muted/20 px-6 py-3">
+          <DownloadMinutesButton
+            meeting={{
+              title: meeting.title,
+              purpose: meeting.purpose,
+              status: meeting.status,
+              createdAt: meeting._creationTime,
+              scheduledFor: meeting.scheduledFor ?? null,
+              endedAt: meeting.endedAt ?? null,
+              summary: meeting.summary ?? "",
+              key_points: meeting.key_points ?? [],
+              decisions: meeting.decisions ?? [],
+              action_items: meeting.action_items ?? [],
+            }}
+            size="sm"
+            variant="outline"
+            label="Download MoM"
+            className="h-8 gap-1.5 text-xs"
+          />
           <Button
             size="sm"
             disabled={!canExportToNotion}

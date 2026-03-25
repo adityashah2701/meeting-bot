@@ -9,6 +9,7 @@ import {
   Bot,
   ChevronRight,
   CreditCard,
+  FileText,
 } from "lucide-react";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
+  { href: "/minutes-of-meetings", label: "Minutes of Meetings", icon: FileText },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];

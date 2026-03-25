@@ -12,6 +12,7 @@ import {
   Plug,
   CreditCard,
   Sparkles,
+  FileText,
   X,
 } from "lucide-react";
 import { AppSidebar } from "@/components/shared/app-sidebar";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
+  { href: "/minutes-of-meetings", label: "Minutes of Meetings", icon: FileText },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
