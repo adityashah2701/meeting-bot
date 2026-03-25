@@ -463,53 +463,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                       </div>
                     )}
 
-                    {/* Action Items */}
-                    {hasActionItems && (
-                      <div>
-                        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-                          Action Items
-                        </p>
-                        {meetingTasks.length > 0 ? (
-                          <TaskBoard
-                            tasks={meetingTasks}
-                            members={taskMembers ?? []}
-                            emptyTitle="No meeting tasks yet"
-                            emptyDescription="Task updates from this meeting will appear here."
-                            onUpdateTask={updateTask}
-                          />
-                        ) : (
-                          <div className="space-y-2">
-                            {meeting.action_items!.map(
-                              (item: { task: string; assignee?: string | null; due?: string | null }, i: number) => (
-                                <div
-                                  key={i}
-                                  className="rounded-lg border border-border bg-muted/20 px-3 py-2.5"
-                                >
-                                  <p className="text-[14px] font-medium text-foreground/90">{item.task}</p>
-                                  {(item.assignee || item.due) && (
-                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                      {item.assignee && (
-                                        <Badge variant="secondary" className="h-5 px-2 text-[11px]">
-                                          {item.assignee}
-                                        </Badge>
-                                      )}
-                                      {item.due && (
-                                        <Badge
-                                          variant="outline"
-                                          className="h-5 border-border/50 px-2 text-[11px] text-muted-foreground"
-                                        >
-                                          {item.due}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                 
                   </div>
                 )}
               </ScrollArea>
