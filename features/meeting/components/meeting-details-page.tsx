@@ -265,9 +265,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
               Notion export is available on paid workspace plans.
             </p>
           )}
-          {notionExport?.lastError && (
-            <p className="text-xs text-destructive">{notionExport.lastError}</p>
-          )}
+         
         </div>
       </div>
 
