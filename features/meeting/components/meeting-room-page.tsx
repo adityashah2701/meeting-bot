@@ -236,8 +236,15 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
       decisions: result.decisions,
       action_items: result.action_items,
     });
-    if (result.actionItems.length > 0) {
-      await createTasksFromSummary({ orgId: currentMeeting.orgId, meetingId, titles: result.actionItems });
+    if (result.action_items.length > 0) {
+      await createTasksFromSummary({
+        orgId: currentMeeting.orgId,
+        meetingId,
+        actionItems: result.action_items.map((item) => ({
+          title: item.task,
+          assigneeName: item.assignee,
+        })),
+      });
     }
     return result;
   }, [createTasksFromSummary, meetingId, saveSummary]);

@@ -313,9 +313,15 @@ export default defineSchema({
     title: v.string(),
     status: v.union(v.literal("open"), v.literal("in_progress"), v.literal("done")),
     assigneeName: v.optional(v.string()),
+    assigneeTokenIdentifier: v.optional(v.string()),
+    suggestedAssigneeName: v.optional(v.string()),
     dueAt: v.optional(v.number()),
     source: v.union(v.literal("manual"), v.literal("summary")),
+    completedAt: v.optional(v.number()),
+    completedByTokenIdentifier: v.optional(v.string()),
+    completedByName: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
   })
     .index("by_orgId_and_status", ["orgId", "status"])
     .index("by_meetingId", ["meetingId"]),

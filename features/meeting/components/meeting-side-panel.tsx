@@ -248,9 +248,16 @@ export function MeetingSidePanel({
         action_items: result.action_items,
       });
 
-      if (result.actionItems.length > 0) {
-        await createTasksFromSummary({ orgId, meetingId, titles: result.actionItems });
-        toast.success(`Summary saved · ${result.actionItems.length} task(s) created`);
+      if (result.action_items.length > 0) {
+        await createTasksFromSummary({
+          orgId,
+          meetingId,
+          actionItems: result.action_items.map((item) => ({
+            title: item.task,
+            assigneeName: item.assignee,
+          })),
+        });
+        toast.success(`Summary saved · ${result.action_items.length} task(s) created`);
       } else {
         toast.success("Summary saved");
       }

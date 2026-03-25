@@ -1,13 +1,137 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
-import { assertMeetingAccess, assertOrgAccess, requireIdentity } from "../lib/auth";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
+import {
+  assertMeetingAccess,
+  assertOrgAccess,
+  getCurrentUserRecord,
+  getIdentityName,
+  hasOrgAccess,
+  requireIdentity,
+} from "../lib/auth";
+
+type ConvexCtx = QueryCtx | MutationCtx;
+type OrgMemberOption = {
+  tokenIdentifier: string;
+  name: string;
+  email: string | null;
+};
+
+const taskStatusValidator = v.union(
+  v.literal("open"),
+  v.literal("in_progress"),
+  v.literal("done"),
+);
+
+function normalizeLookupValue(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function getMemberDisplayName(user: Doc<"users"> | null) {
+  if (!user) {
+    return null;
+  }
+
+  const fullName = user.fullName?.trim();
+  if (fullName) {
+    return fullName;
+  }
+
+  const fallbackName = [user.firstName, user.lastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  return fallbackName || user.email.trim() || null;
+}
+
+async function listOrganizationMembers(
+  ctx: ConvexCtx,
+  orgId: string,
+): Promise<OrgMemberOption[]> {
+  const memberships = await ctx.db
+    .query("user_org_memberships")
+    .withIndex("by_orgId", (q) => q.eq("orgId", orgId))
+    .take(200);
+
+  const seen = new Set<string>();
+  const members: OrgMemberOption[] = [];
+
+  for (const membership of memberships) {
+    if (seen.has(membership.userTokenIdentifier)) {
+      continue;
+    }
+
+    seen.add(membership.userTokenIdentifier);
+    const user = await getCurrentUserRecord(ctx, membership.userTokenIdentifier);
+    const name = getMemberDisplayName(user);
+
+    if (!user || !name) {
+      continue;
+    }
+
+    members.push({
+      tokenIdentifier: user.tokenIdentifier,
+      name,
+      email: user.email?.trim() || null,
+    });
+  }
+
+  members.sort((left, right) => left.name.localeCompare(right.name));
+  return members;
+}
+
+function buildMemberLookup(members: OrgMemberOption[]) {
+  const lookup = new Map<string, OrgMemberOption>();
+
+  for (const member of members) {
+    for (const key of [member.name, member.email]) {
+      const normalized = normalizeLookupValue(key);
+      if (!normalized || lookup.has(normalized)) {
+        continue;
+      }
+
+      lookup.set(normalized, member);
+    }
+  }
+
+  return lookup;
+}
+
+async function resolveAssignedMember(
+  ctx: ConvexCtx,
+  orgId: string,
+  assigneeTokenIdentifier: string | null | undefined,
+) {
+  if (!assigneeTokenIdentifier) {
+    return {
+      assigneeName: undefined,
+      assigneeTokenIdentifier: undefined,
+    };
+  }
+
+  const hasAccess = await hasOrgAccess(ctx, assigneeTokenIdentifier, orgId);
+  if (!hasAccess) {
+    throw new Error("Assignee must belong to this workspace");
+  }
+
+  const user = await getCurrentUserRecord(ctx, assigneeTokenIdentifier);
+  const name = getMemberDisplayName(user);
+  if (!user || !name) {
+    throw new Error("Assignee is unavailable");
+  }
+
+  return {
+    assigneeName: name,
+    assigneeTokenIdentifier: user.tokenIdentifier,
+  };
+}
 
 export const list = query({
   args: {
     orgId: v.string(),
-    status: v.optional(
-      v.union(v.literal("open"), v.literal("in_progress"), v.literal("done")),
-    ),
+    status: v.optional(taskStatusValidator),
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
@@ -28,17 +152,34 @@ export const create = mutation({
     orgId: v.string(),
     meetingId: v.optional(v.id("meetings")),
     title: v.string(),
-    assigneeName: v.optional(v.string()),
+    assigneeTokenIdentifier: v.optional(v.string()),
     dueAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+    if (args.meetingId) {
+      await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+    }
+
+    const assignee = await resolveAssignedMember(
+      ctx,
+      args.orgId,
+      args.assigneeTokenIdentifier,
+    );
+    const now = Date.now();
+
     return await ctx.db.insert("tasks", {
-      ...args,
+      orgId: args.orgId,
+      meetingId: args.meetingId,
+      title: args.title,
       status: "open",
+      assigneeName: assignee.assigneeName,
+      assigneeTokenIdentifier: assignee.assigneeTokenIdentifier,
+      dueAt: args.dueAt,
       source: "manual",
-      createdAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     });
   },
 });
@@ -47,18 +188,26 @@ export const createFromSummary = mutation({
   args: {
     orgId: v.string(),
     meetingId: v.id("meetings"),
-    titles: v.array(v.string()),
+    actionItems: v.array(
+      v.object({
+        title: v.string(),
+        assigneeName: v.optional(v.union(v.string(), v.null())),
+      }),
+    ),
   },
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
     await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
 
-    const normalizedTitles = args.titles
-      .map((title) => title.trim())
-      .filter(Boolean);
+    const normalizedItems = args.actionItems
+      .map((item) => ({
+        title: item.title.trim(),
+        assigneeName: item.assigneeName?.trim() || null,
+      }))
+      .filter((item) => item.title);
 
-    if (normalizedTitles.length === 0) {
+    if (normalizedItems.length === 0) {
       return [];
     }
 
@@ -70,23 +219,35 @@ export const createFromSummary = mutation({
     const existingTitleSet = new Set(
       existingTasks.map((task) => task.title.trim().toLowerCase()),
     );
+    const members = await listOrganizationMembers(ctx, args.orgId);
+    const memberLookup = buildMemberLookup(members);
 
     const now = Date.now();
-    const createdTaskIds = [];
+    const createdTaskIds: Id<"tasks">[] = [];
 
-    for (const title of normalizedTitles) {
-      const normalizedTitle = title.toLowerCase();
+    for (const item of normalizedItems) {
+      const normalizedTitle = item.title.toLowerCase();
       if (existingTitleSet.has(normalizedTitle)) {
         continue;
       }
 
+      const suggestedAssigneeName = item.assigneeName || undefined;
+      const matchedMember = suggestedAssigneeName
+        ? memberLookup.get(normalizeLookupValue(suggestedAssigneeName)) ?? null
+        : null;
+
       const taskId = await ctx.db.insert("tasks", {
         orgId: args.orgId,
         meetingId: args.meetingId,
-        title,
+        title: item.title,
         status: "open",
+        assigneeName: matchedMember?.name,
+        assigneeTokenIdentifier: matchedMember?.tokenIdentifier,
+        suggestedAssigneeName:
+          suggestedAssigneeName && !matchedMember ? suggestedAssigneeName : undefined,
         source: "summary",
         createdAt: now,
+        updatedAt: now,
       });
 
       existingTitleSet.add(normalizedTitle);
@@ -94,5 +255,90 @@ export const createFromSummary = mutation({
     }
 
     return createdTaskIds;
+  },
+});
+
+export const updateTask = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    status: taskStatusValidator,
+    assigneeTokenIdentifier: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    const task = await ctx.db.get(args.taskId);
+
+    if (!task) {
+      throw new Error("Task not found");
+    }
+
+    const currentUser = await assertOrgAccess(
+      ctx,
+      identity.tokenIdentifier,
+      task.orgId,
+    );
+    const assignee =
+      args.assigneeTokenIdentifier === undefined
+        ? {
+            assigneeName: task.assigneeName,
+            assigneeTokenIdentifier: task.assigneeTokenIdentifier,
+          }
+        : await resolveAssignedMember(ctx, task.orgId, args.assigneeTokenIdentifier);
+    const now = Date.now();
+
+    const patch: Partial<Doc<"tasks">> = {
+      status: args.status,
+      assigneeName: assignee.assigneeName,
+      assigneeTokenIdentifier: assignee.assigneeTokenIdentifier,
+      updatedAt: now,
+    };
+
+    if (task.status !== "done" && args.status === "done") {
+      patch.completedAt = now;
+      patch.completedByTokenIdentifier = identity.tokenIdentifier;
+      patch.completedByName =
+        getMemberDisplayName(currentUser) ?? getIdentityName(identity);
+    } else if (task.status === "done" && args.status !== "done") {
+      patch.completedAt = undefined;
+      patch.completedByTokenIdentifier = undefined;
+      patch.completedByName = undefined;
+    }
+
+    if (
+      args.assigneeTokenIdentifier !== undefined
+      && assignee.assigneeTokenIdentifier
+    ) {
+      patch.suggestedAssigneeName = undefined;
+    }
+
+    await ctx.db.patch(task._id, patch);
+    return task._id;
+  },
+});
+
+export const listByMeeting = query({
+  args: {
+    meetingId: v.id("meetings"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
+
+    return await ctx.db
+      .query("tasks")
+      .withIndex("by_meetingId", (q) => q.eq("meetingId", args.meetingId))
+      .order("desc")
+      .take(100);
+  },
+});
+
+export const listOrgMembers = query({
+  args: {
+    orgId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
+    await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
+    return await listOrganizationMembers(ctx, args.orgId);
   },
 });
