@@ -5,7 +5,6 @@ import "@excalidraw/excalidraw/index.css";
 import { cn } from "@/lib/utils";
 import { ClerkProvider } from "@clerk/nextjs";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { dark } from "@clerk/ui/themes";
 import { Providers } from "@/components/providers";
 import { SyncUserWithConvex } from "@/components/sync-user-with-convex";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -45,16 +44,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider
-      appearance={{
-        theme: dark,
-      }}
-    >
+    <ClerkProvider>
       <TooltipProvider>
         <html
           lang="en"
           className={cn(
-            "h-full dark",
+            "h-full",
             "antialiased",
             geistSans.variable,
             geistMono.variable,
