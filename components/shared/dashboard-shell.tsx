@@ -19,6 +19,7 @@ import {
 import { AppSidebar } from "@/components/shared/app-sidebar";
 import { LoadingBlock } from "@/components/shared/loading-block";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import { ThemeToggle } from "@/components/shared/theme-toggle";
 import { CreateMeetingDialog } from "@/features/meeting/components/create-meeting-dialog";
 import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
 import { Button } from "@/components/ui/button";
@@ -147,12 +148,13 @@ function DashboardHeader() {
                     },
                   }}
                 />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-sm text-foreground">Account</p>
                   <p className="text-xs text-muted-foreground">
                     Manage profile
                   </p>
                 </div>
+                <ThemeToggle className="h-8 w-8 shrink-0" />
               </div>
             </div>
 
@@ -188,6 +190,7 @@ function DashboardHeader() {
             triggerVariant="outline"
           />
         </div>
+        <ThemeToggle />
         <NotificationBell />
       </div>
     </header>

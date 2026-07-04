@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useAction, useQuery } from "convex/react";
+import { useAction, useQuery, usePaginatedQuery } from "convex/react";
 import ReactMarkdown from "react-markdown";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LoadingBlock } from "@/components/shared/loading-block";
@@ -55,7 +55,15 @@ function getSyncedTranscriptLine(
 export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   useSyncOrganizationBilling(meeting?.orgId);
-  const transcripts = useQuery(meetingService.listTranscripts, { meetingId });
+  const {
+    results: transcripts,
+    status: transcriptsStatus,
+    loadMore: loadMoreTranscripts,
+  } = usePaginatedQuery(
+    meetingService.listPagedTranscripts,
+    { meetingId },
+    { initialNumItems: 100 },
+  );
   const recordings = useQuery(meetingService.listRecordings, { meetingId });
   const billing = useQuery(
     billingService.getOrganizationPlan,
@@ -77,7 +85,7 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
 
   if (
     meeting === undefined
-    || transcripts === undefined
+    || transcriptsStatus === "LoadingFirstPage"
     || recordings === undefined
     || meetingTasks === undefined
   ) {
@@ -341,6 +349,22 @@ export function MeetingDetailsPage({ meetingId }: { meetingId: Id<"meetings"> })
                     </div>
                   );
                 })}
+                {transcriptsStatus === "CanLoadMore" && (
+                  <div className="flex justify-center py-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => loadMoreTranscripts(100)}
+                    >
+                      Load earlier messages
+                    </Button>
+                  </div>
+                )}
+                {transcriptsStatus === "LoadingMore" && (
+                  <div className="py-4 text-center text-[12px] text-muted-foreground">
+                    Loading earlier messages…
+                  </div>
+                )}
               </div>
             )}
           </ScrollArea>

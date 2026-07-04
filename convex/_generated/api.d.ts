@@ -10,6 +10,7 @@
 
 import type * as billing_index from "../billing/index.js";
 import type * as dashboard_index from "../dashboard/index.js";
+import type * as deleteAll from "../deleteAll.js";
 import type * as http from "../http.js";
 import type * as insights_index from "../insights/index.js";
 import type * as integrations_index from "../integrations/index.js";
@@ -20,6 +21,7 @@ import type * as lib_auth from "../lib/auth.js";
 import type * as lib_invitations from "../lib/invitations.js";
 import type * as lib_meetingPermissions from "../lib/meetingPermissions.js";
 import type * as lib_meetinghelpers from "../lib/meetinghelpers.js";
+import type * as lib_rateLimiter from "../lib/rateLimiter.js";
 import type * as meetings_index from "../meetings/index.js";
 import type * as meetings_summaryChunks from "../meetings/summaryChunks.js";
 import type * as messages_index from "../messages/index.js";
@@ -42,6 +44,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   "billing/index": typeof billing_index;
   "dashboard/index": typeof dashboard_index;
+  deleteAll: typeof deleteAll;
   http: typeof http;
   "insights/index": typeof insights_index;
   "integrations/index": typeof integrations_index;
@@ -52,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   "lib/invitations": typeof lib_invitations;
   "lib/meetingPermissions": typeof lib_meetingPermissions;
   "lib/meetinghelpers": typeof lib_meetinghelpers;
+  "lib/rateLimiter": typeof lib_rateLimiter;
   "meetings/index": typeof meetings_index;
   "meetings/summaryChunks": typeof meetings_summaryChunks;
   "messages/index": typeof messages_index;

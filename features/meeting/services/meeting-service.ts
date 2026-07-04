@@ -49,8 +49,8 @@ export const meetingService = {
   listSignals: api.signals.index.listForParticipant,
   sendSignal: api.signals.index.send,
   clearSignals: api.signals.index.clear,
-  listTranscripts: api.transcripts.index.list,
-  addTranscript: api.transcripts.index.add,
+  listLiveTranscripts: api.transcripts.index.listLive,
+  listPagedTranscripts: api.transcripts.index.listPaged,
   addTranscriptBatch: api.transcripts.index.addBatch,
   createTasksFromSummary: api.tasks.index.createFromSummary,
 };

@@ -57,6 +57,7 @@ export default function RootLayout({
             inter.variable,
           )}
           suppressHydrationWarning
+          data-scroll-behavior="smooth"
         >
           <body className="min-h-full flex flex-col" suppressHydrationWarning>
             <Providers>

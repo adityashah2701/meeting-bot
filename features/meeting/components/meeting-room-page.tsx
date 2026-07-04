@@ -28,6 +28,7 @@ import {
   type TranscriptLine,
   type TranscriptionMode,
 } from "@/features/ai/hooks/use-transcription";
+import { useTranscriptSync } from "@/features/ai/hooks/use-transcript-sync";
 import { useWebrtc } from "@/features/webrtc/hooks/use-webrtc";
 import { ParticipantGrid } from "@/features/webrtc/components/participant-grid";
 import { MeetingControls } from "@/features/webrtc/components/meeting-controls";
@@ -113,14 +114,13 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const router = useRouter();
   const meeting = useQuery(meetingService.getMeeting, { meetingId });
   useSyncOrganizationBilling(meeting?.orgId);
-  const transcriptRows = useQuery(meetingService.listTranscripts, { meetingId });
+  const transcriptRows = useQuery(meetingService.listLiveTranscripts, { meetingId });
   const recordings = useQuery(meetingService.listRecordings, { meetingId }) ?? [];
   const billing = useQuery(
     billingService.getOrganizationPlan,
     meeting?.orgId ? { orgId: meeting.orgId } : "skip",
   );
   const whiteboard = useQuery(meetingService.getWhiteboard, { meetingId });
-  const addTranscriptBatch = useMutation(meetingService.addTranscriptBatch);
   const saveSummary = useMutation(meetingService.saveSummary);
   const setWhiteboardOpen = useMutation(meetingService.setWhiteboardOpen);
   const saveWhiteboardScene = useMutation(meetingService.saveWhiteboardScene);
@@ -133,8 +133,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const markRecordingFailed = useMutation(meetingService.markRecordingFailed);
   const sendReaction = useMutation(meetingService.sendReaction);
 
-  const [interimTranscript, setInterimTranscript] = useState<TranscriptLine | null>(null);
-  const [queuedTranscriptLines, setQueuedTranscriptLines] = useState<TranscriptLine[]>([]);
+  const { queuedLines, enqueueTranscript } = useTranscriptSync({ meetingId });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>("auto");
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
@@ -147,7 +146,6 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const [isViewOptionsOpen, setIsViewOptionsOpen] = useState(false);
   const [isMeetingSettingsOpen, setIsMeetingSettingsOpen] = useState(false);
   const dbTranscript = useMemo(() => transcriptRows ?? [], [transcriptRows]);
-  const transcriptQueueRef = useRef<Array<{ text: string; timestamp: number }>>([]);
   const meetingCaptureRootRef = useRef<HTMLDivElement | null>(null);
   const recordingSessionRef = useRef<{
     recordingId: Id<"meeting_recordings">;
@@ -197,28 +195,19 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
       timestamp: entry.timestamp,
       isInterim: false,
     }));
-    const withQueued = [...persisted, ...queuedTranscriptLines];
-    const full = interimTranscript ? [...withQueued, interimTranscript] : withQueued;
+    // Merge persisted (all speakers) with this client's optimistic lines and
+    // sort by capture timestamp so speech stays in chronological order even
+    // when local lines have not yet round-tripped through Convex.
+    const full = [...persisted, ...queuedLines].sort(
+      (a, b) => a.timestamp - b.timestamp,
+    );
     transcriptRef.current = full;
     return full;
-  }, [dbTranscript, interimTranscript, queuedTranscriptLines]);
+  }, [dbTranscript, queuedLines]);
 
   useEffect(() => {
     setTranscriptionMode(getDefaultTranscriptionMode());
   }, []);
-
-  // Batch flush interval
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      const entries = transcriptQueueRef.current;
-      if (entries.length === 0) return;
-      transcriptQueueRef.current = [];
-      addTranscriptBatch({ meetingId, entries })
-        .then(() => { setQueuedTranscriptLines((cur) => cur.slice(entries.length)); })
-        .catch(() => { transcriptQueueRef.current = [...entries, ...transcriptQueueRef.current]; });
-    }, 1200);
-    return () => window.clearInterval(intervalId);
-  }, [addTranscriptBatch, meetingId]);
 
   const buildMeetingArtifacts = useCallback(async (): Promise<MeetingSummaryResult | null> => {
     const currentMeeting = meetingRef.current;
@@ -269,14 +258,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     enabled: Boolean(participantId && meeting?.status !== "ended" && !permissionDenied && !isAudioMuted),
     stream: localStream,
     mode: transcriptionMode,
+    meetingId,
     userId: participantId ?? "local",
     userName: "You",
-    onTranscript: (line) => {
-      // Whisper returns only final text — no interim lines
-      setInterimTranscript(null);
-      setQueuedTranscriptLines((cur) => [...cur, { ...line, id: `queued-${line.timestamp}` }]);
-      transcriptQueueRef.current.push({ text: line.text, timestamp: line.timestamp });
-    },
+    // Each line carries a stable clientId (line.id) and a capture-time
+    // timestamp; the sync hook persists it idempotently.
+    onTranscript: enqueueTranscript,
   });
 
   useEffect(() => {

@@ -1,141 +1,38 @@
 import Groq from "groq-sdk";
+import { auth } from "@clerk/nextjs/server";
+import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
-import { getClientIp, isRateLimited } from "@/lib/rate-limit";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { getTranscriptionConfig } from "@/lib/transcription/modes";
+import { createLogger, metric, newRequestId } from "@/lib/observability/logger";
+import {
+  extractCleanText,
+  isInstructionArtifact,
+  isPromptLeak,
+  type WhisperResponse,
+} from "./transcript-filters";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const TRANSCRIPTION_MODEL = "whisper-large-v3";
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
-const TRANSCRIBE_RATE_LIMIT = 90;
-const TRANSCRIBE_RATE_WINDOW_MS = 60_000;
-const MAX_NO_SPEECH_PROB = 0.35;
-const MIN_AVG_LOGPROB = -0.8;
-const MAX_COMPRESSION_RATIO = 2.4;
-const PROMPT_LEAK_SNIPPETS = [
-  "output only the spoken words",
-  "do not translate",
-  "do not translate or paraphrase",
-  "preserve names and technical terms",
-];
-const INSTRUCTION_ARTIFACTS = [
-  "do not translate",
-  "don't translate",
-  "do not translate or paraphrase",
-  "preserve names and technical terms",
-  "keep names and technical terms as spoken",
-  "keep code switching",
-];
 
-type TranscriptionMode =
-  | "auto"
-  | "hindi_english_marathi"
-  | "hindi_english"
-  | "hindi"
-  | "marathi"
-  | "english";
+// Groq retry policy for transient failures (429 / 5xx). Total added latency is
+// bounded: base 250ms, doubling, capped, with jitter.
+const GROQ_MAX_ATTEMPTS = 3;
+const GROQ_BASE_BACKOFF_MS = 250;
+const GROQ_MAX_BACKOFF_MS = 2_000;
 
-function getTranscriptionConfig(mode: string | null) {
-  const normalizedMode: TranscriptionMode =
-    mode === "hindi_english_marathi"
-    || mode === "hindi_english"
-    || mode === "hindi"
-    || mode === "marathi"
-    || mode === "english"
-      ? mode
-      : "auto";
-
-  switch (normalizedMode) {
-    case "hindi_english_marathi":
-      return {
-        language: undefined,
-        prompt: "Mixed Hindi, Marathi, and English conversation. Output only the spoken words.",
-        scriptMode: "devanagari_latin" as const,
-      };
-    case "hindi_english":
-      return {
-        language: "hi" as const,
-        prompt: "Mixed Hindi and English conversation. Output only the spoken words.",
-        scriptMode: "devanagari_latin" as const,
-      };
-    case "hindi":
-      return {
-        language: "hi" as const,
-        prompt: "Hindi speech. Output only the spoken words.",
-        scriptMode: "devanagari_latin" as const,
-      };
-    case "marathi":
-      return {
-        language: "mr" as const,
-        prompt: "Marathi speech. Output only the spoken words.",
-        scriptMode: "devanagari_latin" as const,
-      };
-    case "english":
-      return {
-        language: "en" as const,
-        prompt: "English speech. Output only the spoken words.",
-        scriptMode: "latin_only" as const,
-      };
-    default:
-      return {
-        language: "hi" as const,
-        prompt: "Indian multilingual speech (Hindi, Marathi, English). Output only the spoken words.",
-        scriptMode: "devanagari_latin" as const,
-      };
-  }
+function jsonEmpty(requestId: string, extra?: Record<string, unknown>) {
+  return NextResponse.json({ text: "", requestId, ...extra });
 }
 
-function hasUnsupportedScript(text: string, scriptMode: "devanagari_latin" | "latin_only") {
-  if (!text.trim()) return false;
-
-  // Latin letters and common punctuation/numbers
-  const latin = /[A-Za-z]/;
-  const devanagari = /[\u0900-\u097F]/;
-
-  for (const ch of text) {
-    if (/[\d\s.,!?'"`~@#$%^&*()_\-+=:;<>/\\|[\]{}]/.test(ch)) continue;
-    if (scriptMode === "latin_only") {
-      if (latin.test(ch)) continue;
-      return true;
-    }
-    if (latin.test(ch) || devanagari.test(ch)) continue;
-    return true;
-  }
-
-  return false;
-}
-
-function normalizeText(value: string) {
-  return value.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
-}
-
-function isPromptLeak(text: string, prompt: string | undefined) {
-  const normalizedText = normalizeText(text);
-  if (!normalizedText) return false;
-
-  const normalizedPrompt = prompt ? normalizeText(prompt) : "";
-  if (normalizedPrompt && normalizedText.length >= 24 && normalizedPrompt.includes(normalizedText)) {
-    return true;
-  }
-
-  return PROMPT_LEAK_SNIPPETS.some((snippet) => normalizedText.includes(snippet));
-}
-
-function isInstructionArtifact(text: string) {
-  const normalizedText = normalizeText(text);
-  if (!normalizedText) return false;
-
-  return INSTRUCTION_ARTIFACTS.some((artifact) =>
-    normalizedText === artifact || normalizedText.startsWith(artifact),
-  );
-}
-
-function getFileExtension(file: File) {
+function getFileExtension(file: File): string {
   const filename = file.name || "";
   const lastSegment = filename.split(".").pop()?.toLowerCase();
-
   if (lastSegment && lastSegment !== filename.toLowerCase()) {
     return lastSegment;
   }
-
   const mimeType = file.type.toLowerCase();
   if (mimeType.includes("mp4")) return "mp4";
   if (mimeType.includes("mpeg")) return "mp3";
@@ -144,97 +41,196 @@ function getFileExtension(file: File) {
   return "webm";
 }
 
+async function getConvexToken(): Promise<string | null> {
+  const clerkAuth = await auth();
+  if (!clerkAuth.userId) return null;
+  if (clerkAuth.sessionClaims?.aud === "convex") {
+    return await clerkAuth.getToken();
+  }
+  return await clerkAuth.getToken({ template: "convex" });
+}
+
+function isRetryableGroqError(error: unknown): boolean {
+  if (error instanceof Groq.APIError) {
+    const status = error.status ?? 0;
+    return status === 429 || status === 408 || status >= 500;
+  }
+  // Network-level failures (fetch throws) are retryable.
+  return error instanceof Error;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function transcribeWithRetry(
+  file: File,
+  config: ReturnType<typeof getTranscriptionConfig>,
+): Promise<WhisperResponse> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= GROQ_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return (await groq.audio.transcriptions.create({
+        file,
+        model: TRANSCRIPTION_MODEL,
+        response_format: "verbose_json",
+        language: config.language,
+        prompt: config.prompt,
+        temperature: 0,
+      })) as unknown as WhisperResponse;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= GROQ_MAX_ATTEMPTS || !isRetryableGroqError(error)) {
+        throw error;
+      }
+      const backoff = Math.min(
+        GROQ_MAX_BACKOFF_MS,
+        GROQ_BASE_BACKOFF_MS * 2 ** (attempt - 1),
+      );
+      const jitter = Math.floor(Math.random() * (backoff / 2));
+      await sleep(backoff + jitter);
+    }
+  }
+  throw lastError;
+}
+
 export async function POST(request: Request) {
+  const requestId = newRequestId();
+  const startedAt = Date.now();
+  const log = createLogger({ route: "transcribe", requestId });
+
   try {
-    const ip = getClientIp(request);
-    if (
-      isRateLimited(
-        `transcribe:${ip}`,
-        TRANSCRIBE_RATE_LIMIT,
-        TRANSCRIBE_RATE_WINDOW_MS,
-      )
-    ) {
+    // 1. Authenticate. The Groq call is expensive, so it is gated behind a
+    //    real identity — no more anonymous IP-only access.
+    const convexToken = await getConvexToken();
+    if (!convexToken) {
+      log.warn("unauthenticated");
       return NextResponse.json(
-        { error: "Too many transcription requests", text: "" },
-        { status: 429 },
+        { error: "Unauthorized", text: "", requestId },
+        { status: 401 },
       );
     }
 
     const formData = await request.formData();
     const audioBlob = formData.get("audio") as File | null;
-    const transcriptionMode = formData.get("mode");
+    const meetingIdRaw = formData.get("meetingId");
+    const meetingId =
+      typeof meetingIdRaw === "string" && meetingIdRaw ? meetingIdRaw : null;
 
+    if (!meetingId) {
+      return NextResponse.json(
+        { error: "meetingId is required", text: "", requestId },
+        { status: 400 },
+      );
+    }
     if (!audioBlob || audioBlob.size === 0) {
-      return NextResponse.json({ text: "" });
+      return jsonEmpty(requestId);
     }
     if (audioBlob.size > MAX_AUDIO_BYTES) {
+      log.warn("audio_too_large", { bytes: audioBlob.size });
       return NextResponse.json(
-        { error: "Audio chunk too large", text: "" },
+        { error: "Audio chunk too large", text: "", requestId },
         { status: 413 },
       );
     }
 
+    // 2. Enforce meeting access + per-user quota inside Convex (horizontally
+    //    correct, unlike the old per-instance in-memory limiter).
+    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+    if (!convexUrl) {
+      log.error("missing_convex_url");
+      return NextResponse.json(
+        { error: "Server misconfigured", text: "", requestId },
+        { status: 500 },
+      );
+    }
+    const convex = new ConvexHttpClient(convexUrl);
+    convex.setAuth(convexToken);
+
+    let quota: { allowed: boolean; retryAfterMs: number };
+    try {
+      quota = await convex.mutation(api.transcripts.index.consumeTranscriptionQuota, {
+        meetingId: meetingId as Id<"meetings">,
+      });
+    } catch (error) {
+      // assertMeetingAccess / requireIdentity throw here -> not authorized.
+      log.warn("quota_denied", { reason: (error as Error).message });
+      return NextResponse.json(
+        { error: "Forbidden", text: "", requestId },
+        { status: 403 },
+      );
+    }
+
+    if (!quota.allowed) {
+      const retryAfterSec = Math.ceil(quota.retryAfterMs / 1000);
+      metric("transcribe.rate_limited", 1, { meetingId });
+      return NextResponse.json(
+        { error: "Too many transcription requests", text: "", requestId },
+        { status: 429, headers: { "Retry-After": String(retryAfterSec) } },
+      );
+    }
+
+    // 3. Transcribe via Groq with bounded retry/backoff.
     const extension = getFileExtension(audioBlob);
     const file = new File(
       [audioBlob],
       audioBlob.name || `audio.${extension}`,
       { type: audioBlob.type || `audio/${extension}` },
     );
-    const config = getTranscriptionConfig(
-      typeof transcriptionMode === "string"
-        ? transcriptionMode.trim().toLowerCase()
-        : null,
+    const config = getTranscriptionConfig(formData.get("mode"));
+
+    const groqStartedAt = Date.now();
+    const response = await transcribeWithRetry(file, config);
+    const groqLatencyMs = Date.now() - groqStartedAt;
+
+    // 4. Clean + guard against prompt leakage / instruction artifacts.
+    const { text, segmentsTotal, segmentsKept, dropReasons } = extractCleanText(
+      response,
+      config.scriptMode,
     );
 
-    const response = await groq.audio.transcriptions.create({
-      file,
-      model: TRANSCRIPTION_MODEL,
-      response_format: "verbose_json",
-      language: config.language,
-      prompt: config.prompt,
-      temperature: 0,
-    }) as unknown as {
-      text: string;
-      segments?: {
-        text: string;
-        no_speech_prob?: number;
-        avg_logprob?: number;
-        compression_ratio?: number;
-      }[];
-    };
+    let finalText = text;
+    let filterReason: string | undefined;
 
-    let text = "";
-    if (response.segments && Array.isArray(response.segments)) {
-      const validSegments = response.segments.filter((seg) => {
-        // Drop noisy/hallucinated segments more aggressively.
-        if (typeof seg.no_speech_prob === "number" && seg.no_speech_prob > MAX_NO_SPEECH_PROB) return false;
-        if (typeof seg.avg_logprob === "number" && seg.avg_logprob < MIN_AVG_LOGPROB) return false;
-        if (typeof seg.compression_ratio === "number" && seg.compression_ratio > MAX_COMPRESSION_RATIO) return false;
-        if (!seg.text || seg.text.trim().length < 2) return false;
-        if (hasUnsupportedScript(seg.text, config.scriptMode)) return false;
-        return true;
-      });
-      text = validSegments.map((seg) => seg.text).join(" ").replace(/\s+/g, " ").trim();
-    } else {
-      text = (response.text ?? "").trim();
-      if (hasUnsupportedScript(text, config.scriptMode)) {
-        text = "";
-      }
+    if (segmentsTotal > 0 && segmentsKept === 0) {
+      // Segments were returned by Groq but all dropped by quality thresholds.
+      filterReason = "quality_filter";
+    } else if (!finalText && segmentsTotal === 0) {
+      // Groq returned genuinely empty output (no segments, no top-level text).
+      filterReason = "groq_empty";
+    } else if (finalText && isInstructionArtifact(finalText)) {
+      finalText = "";
+      filterReason = "instruction_artifact";
+    } else if (finalText && isPromptLeak(finalText, config.prompt)) {
+      finalText = "";
+      filterReason = "prompt_leak";
     }
 
-    if (isPromptLeak(text, config.prompt)) {
-      return NextResponse.json({ text: "" });
-    }
-    if (isInstructionArtifact(text)) {
-      return NextResponse.json({ text: "" });
-    }
+    metric("transcribe.groq_latency_ms", groqLatencyMs, { meetingId });
+    metric("transcribe.segments_dropped", segmentsTotal - segmentsKept, { meetingId });
+    log.info("transcribed", {
+      meetingId,
+      bytes: audioBlob.size,
+      groqLatencyMs,
+      totalLatencyMs: Date.now() - startedAt,
+      segmentsTotal,
+      segmentsKept,
+      chars: finalText.length,
+      outcome: finalText ? "ok" : "empty",
+      ...(filterReason ? { filterReason } : {}),
+      ...(Object.keys(dropReasons).length > 0 ? { dropReasons } : {}),
+    });
 
-    return NextResponse.json({ text });
+    return NextResponse.json({ text: finalText, requestId });
   } catch (error) {
-    console.error("[transcribe] Groq error:", error);
+    const status = error instanceof Groq.APIError ? error.status || 502 : 500;
+    log.error("transcribe_failed", {
+      status,
+      message: error instanceof Error ? error.message : String(error),
+      totalLatencyMs: Date.now() - startedAt,
+    });
+    metric("transcribe.error", 1, { status });
     return NextResponse.json(
-      { error: "Transcription failed", text: "" },
-      { status: error instanceof Groq.APIError ? error.status || 502 : 500 },
+      { error: "Transcription failed", text: "", requestId },
+      { status },
     );
   }
 }

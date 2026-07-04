@@ -9,12 +9,12 @@ export function Navbar() {
   return (
     <nav className="fixed top-0 w-full z-50">
       {/* Subtle top highlight line */}
-      <div className="h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
-      <div className="border-b border-white/[0.06] bg-[oklch(0.12_0.006_85/0.7)] backdrop-blur-2xl backdrop-saturate-150">
+      <div className="h-px bg-linear-to-r from-transparent via-primary/40 to-transparent" />
+      <div className="border-b border-border/60 bg-background/80 backdrop-blur-2xl backdrop-saturate-150">
         <div className="mx-auto max-w-[1200px] px-6 h-[64px] flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 transition-all duration-300 group-hover:ring-primary/40 group-hover:shadow-[0_0_12px_-2px] group-hover:shadow-primary/20">
+            <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 transition-all duration-300 group-hover:ring-primary/40 group-hover:shadow-[0_0_12px_-2px] group-hover:shadow-primary/20">
               <Bot className="h-[18px] w-[18px] text-primary transition-transform duration-300 group-hover:scale-110" />
             </div>
             <span className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">

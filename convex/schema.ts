@@ -199,7 +199,13 @@ export default defineSchema({
     text: v.string(),
     timestamp: v.number(),
     createdAt: v.number(),
-  }).index("by_meetingId_and_timestamp", ["meetingId", "timestamp"]),
+    // Stable client-generated dedup key (`sessionId:seq`). Optional so existing
+    // rows remain valid (widen-only migration). Used by `transcripts.addBatch`
+    // to make persistence idempotent under retries / duplicate events.
+    clientId: v.optional(v.string()),
+  })
+    .index("by_meetingId_and_timestamp", ["meetingId", "timestamp"])
+    .index("by_meetingId_and_clientId", ["meetingId", "clientId"]),
 
   meeting_assets: defineTable({
     meetingId: v.id("meetings"),
@@ -406,4 +412,14 @@ export default defineSchema({
   })
     .index("by_meetingId", ["meetingId"])
     .index("by_meetingId_and_chunkIndex", ["meetingId", "chunkIndex"]),
+
+  // Convex-native token-bucket rate limiting. One small document per bucket
+  // key (e.g. `transcribe:<tokenIdentifier>`), so writes never contend with
+  // the meeting hot document. Replaces the per-instance in-memory limiter in
+  // `lib/rate-limit.ts`, which is both ineffective and leaky on serverless.
+  rate_limits: defineTable({
+    key: v.string(),
+    tokens: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 });

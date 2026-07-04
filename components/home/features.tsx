@@ -52,12 +52,12 @@ const features = [
 ];
 
 const accentMap: Record<string, { icon: string; bg: string; border: string; glow: string }> = {
-  emerald: { icon: "text-emerald-400", bg: "bg-emerald-500/[0.08]", border: "border-emerald-500/[0.12]", glow: "group-hover:shadow-emerald-500/[0.06]" },
-  violet: { icon: "text-violet-400", bg: "bg-violet-500/[0.08]", border: "border-violet-500/[0.12]", glow: "group-hover:shadow-violet-500/[0.06]" },
-  amber: { icon: "text-amber-400", bg: "bg-amber-500/[0.08]", border: "border-amber-500/[0.12]", glow: "group-hover:shadow-amber-500/[0.06]" },
-  blue: { icon: "text-blue-400", bg: "bg-blue-500/[0.08]", border: "border-blue-500/[0.12]", glow: "group-hover:shadow-blue-500/[0.06]" },
-  rose: { icon: "text-rose-400", bg: "bg-rose-500/[0.08]", border: "border-rose-500/[0.12]", glow: "group-hover:shadow-rose-500/[0.06]" },
-  slate: { icon: "text-slate-400", bg: "bg-slate-500/[0.08]", border: "border-slate-500/[0.12]", glow: "group-hover:shadow-slate-500/[0.06]" },
+  emerald: { icon: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/[0.08]", border: "border-emerald-500/20", glow: "group-hover:shadow-emerald-500/[0.06]" },
+  violet:  { icon: "text-violet-600 dark:text-violet-400",  bg: "bg-violet-500/[0.08]",  border: "border-violet-500/20",  glow: "group-hover:shadow-violet-500/[0.06]"  },
+  amber:   { icon: "text-amber-600 dark:text-amber-400",   bg: "bg-amber-500/[0.08]",   border: "border-amber-500/20",   glow: "group-hover:shadow-amber-500/[0.06]"   },
+  blue:    { icon: "text-blue-600 dark:text-blue-400",     bg: "bg-blue-500/[0.08]",    border: "border-blue-500/20",    glow: "group-hover:shadow-blue-500/[0.06]"    },
+  rose:    { icon: "text-rose-600 dark:text-rose-400",     bg: "bg-rose-500/[0.08]",    border: "border-rose-500/20",    glow: "group-hover:shadow-rose-500/[0.06]"    },
+  slate:   { icon: "text-slate-600 dark:text-slate-400",   bg: "bg-slate-500/[0.08]",   border: "border-slate-500/20",   glow: "group-hover:shadow-slate-500/[0.06]"   },
 };
 
 const stats = [
@@ -99,7 +99,7 @@ export function Features() {
     <>
       {/* ── Stats bar ── */}
       <section className="w-full max-w-[960px] mx-auto mt-28">
-        <div className="grid grid-cols-2 md:grid-cols-4 rounded-2xl border border-white/[0.06] bg-[oklch(0.16_0.008_85)] overflow-hidden divide-x divide-white/[0.04]">
+        <div className="grid grid-cols-2 md:grid-cols-4 rounded-2xl border border-border bg-card overflow-hidden divide-x divide-border">
           {stats.map((s) => (
             <div key={s.label} className="flex flex-col items-center justify-center py-8 gap-1 text-center px-4">
               <p className="text-3xl md:text-4xl font-extrabold tabular-nums tracking-tight text-foreground">{s.value}</p>
@@ -112,7 +112,7 @@ export function Features() {
       {/* ── Features grid ── */}
       <section id="features" className="w-full max-w-[1200px] mx-auto mt-32 px-6 lg:px-0">
         <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-[0.08em] mb-5">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.08em] mb-5">
             <Zap className="h-3 w-3 text-primary" />
             Feature set
           </div>
@@ -141,7 +141,7 @@ export function Features() {
             return (
               <div
                 key={f.title}
-                className={`group relative overflow-hidden rounded-2xl border ${colors.border} bg-[oklch(0.16_0.008_85)] transition-all duration-300 hover:bg-[oklch(0.18_0.008_85)] hover:shadow-[0_8px_40px_-12px] ${colors.glow} hover:-translate-y-0.5 ${spanClass} ${isWide ? "p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-5" : "p-6"}`}
+                className={`group relative overflow-hidden rounded-2xl border ${colors.border} bg-card transition-all duration-300 hover:bg-muted/30 hover:shadow-[0_8px_40px_-12px] ${colors.glow} hover:-translate-y-0.5 ${spanClass} ${isWide ? "p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-5" : "p-6"}`}
               >
                 <div className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${colors.bg} ${isWide ? "" : "mb-5"} transition-transform duration-300 group-hover:scale-105`}>
                   <Icon className={`h-5 w-5 ${colors.icon}`} />
@@ -162,7 +162,7 @@ export function Features() {
       {/* ── How it works ── */}
       <section id="how-it-works" className="w-full max-w-[1200px] mx-auto mt-36 px-6 lg:px-0">
         <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-[0.08em] mb-5">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.08em] mb-5">
             <CheckSquare className="h-3 w-3 text-primary" />
             How it works
           </div>
@@ -177,13 +177,13 @@ export function Features() {
         <div className="relative grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           {/* Connector line — desktop only */}
           <div className="pointer-events-none absolute top-[22px] left-[12%] right-[12%] hidden lg:block">
-            <div className="h-px w-full bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+            <div className="h-px w-full bg-linear-to-r from-transparent via-white/8 to-transparent" />
           </div>
 
           {steps.map((step) => (
               <div key={step.number} className="group relative flex flex-col gap-4">
                 {/* Step number */}
-                <div className="relative z-10 flex h-11 w-11 items-center justify-center rounded-full border border-primary/20 bg-primary/[0.08] text-[12px] font-extrabold text-primary tracking-wide transition-all duration-300 group-hover:border-primary/40 group-hover:bg-primary/[0.14] group-hover:shadow-[0_0_16px_-4px] group-hover:shadow-primary/20">
+                <div className="relative z-10 flex h-11 w-11 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-[12px] font-extrabold text-primary tracking-wide transition-all duration-300 group-hover:border-primary/40 group-hover:bg-primary/[0.14] group-hover:shadow-[0_0_16px_-4px] group-hover:shadow-primary/20">
                   {step.number}
                 </div>
                 <div>
@@ -197,10 +197,10 @@ export function Features() {
 
       {/* ── Integrations ── */}
       <section id="integrations" className="w-full max-w-[1200px] mx-auto mt-36 px-6 lg:px-0">
-        <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[oklch(0.16_0.008_85)] p-8 md:p-12">
+        <div className="overflow-hidden rounded-2xl border border-border bg-card p-8 md:p-12">
           <div className="grid md:grid-cols-2 gap-10 items-center">
             <div>
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-[0.08em] mb-5">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.08em] mb-5">
                 <Radio className="h-3 w-3 text-primary" />
                 Integrations
               </div>
@@ -215,15 +215,15 @@ export function Features() {
                   { icon: CalendarDays, name: "Google Calendar", desc: "Auto-sync meeting events and attendees" },
                   { icon: FileText, name: "Notion", desc: "Export summaries, decisions, and recordings" },
                 ].map((i) => (
-                  <div key={i.name} className="group flex items-center gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5 transition-colors duration-200 hover:bg-white/[0.04]">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/[0.08] ring-1 ring-primary/15 transition-all duration-300 group-hover:ring-primary/30">
+                  <div key={i.name} className="group flex items-center gap-4 rounded-xl border border-border bg-muted/30 px-4 py-3.5 transition-colors duration-200 hover:bg-muted/60">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/8 ring-1 ring-primary/15 transition-all duration-300 group-hover:ring-primary/30">
                       <i.icon className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-[14px] font-semibold text-foreground">{i.name}</p>
                       <p className="text-[12px] text-muted-foreground/50">{i.desc}</p>
                     </div>
-                    <div className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/[0.06] px-2.5 py-0.5 text-[10px] font-semibold text-emerald-400 tracking-wide">
+                    <div className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/6 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 tracking-wide">
                       Available
                     </div>
                   </div>
@@ -233,16 +233,16 @@ export function Features() {
             <div className="relative hidden md:flex items-center justify-center">
               {/* Decorative integration illustration */}
               <div className="relative flex flex-col items-center gap-6">
-                <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-primary/15 bg-primary/[0.06] shadow-[0_8px_32px_-8px] shadow-primary/10">
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-primary/15 bg-primary/6 shadow-[0_8px_32px_-8px] shadow-primary/10">
                   <BrainCircuit className="h-10 w-10 text-primary" />
                 </div>
                 {/* Connector */}
-                <div className="h-6 w-px bg-gradient-to-b from-primary/20 to-transparent" />
+                <div className="h-6 w-px bg-linear-to-b from-primary/20 to-transparent" />
                 <div className="flex gap-6">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-rose-500/15 bg-rose-500/[0.06] shadow-lg shadow-rose-500/5">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-rose-500/15 bg-rose-500/6 shadow-lg shadow-rose-500/5">
                     <CalendarDays className="h-7 w-7 text-rose-400" />
                   </div>
-                  <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-500/15 bg-slate-500/[0.06] shadow-lg shadow-slate-500/5">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-500/15 bg-slate-500/6 shadow-lg shadow-slate-500/5">
                     <FileText className="h-7 w-7 text-slate-400" />
                   </div>
                 </div>
