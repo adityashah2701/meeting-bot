@@ -82,7 +82,7 @@ export function RoomShell({
   const collapsed = !isSidebarOpen;
 
   const stageArea = (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden p-3 lg:p-5">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden p-3 pb-24 lg:p-5 lg:pb-28">
       {stageBanner === null && (lockedBanner || blockedBanner) ? (
         <div className="mb-3 flex flex-col gap-2">
           {lockedBanner ? <SystemBanner variant="locked" /> : null}

@@ -131,7 +131,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const sendReaction = useMutation(meetingService.sendReaction);
 
   const { queuedLines, enqueueTranscript } = useTranscriptSync({ meetingId });
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>("auto");
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);

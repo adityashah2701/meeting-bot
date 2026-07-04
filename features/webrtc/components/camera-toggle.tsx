@@ -22,7 +22,7 @@ export function CameraToggle({
       className={cn(
         "rounded-xl cursor-pointer",
         off &&
-          "border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background",
+          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:text-secondary-foreground",
       )}
       aria-pressed={off}
       title={off ? "Turn camera on" : "Turn camera off"}

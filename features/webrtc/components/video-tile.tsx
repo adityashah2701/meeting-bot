@@ -225,23 +225,19 @@ export function VideoTile({
         </div>
       )}
 
-      {/* Name bar */}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-linear-to-t from-black/75 to-transparent px-3 py-2 text-xs text-white">
-        <span className="flex items-center gap-1.5 truncate font-medium drop-shadow">
-          {isSpeaking && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
-          <span className="truncate">
-            {name}
-            {isLocal ? " (You)" : ""}
-          </span>
+      {/* Name and Status Pill */}
+      <div className="absolute left-2 bottom-2 max-w-[calc(100%-16px)] flex items-center gap-2 rounded-lg bg-black/40 px-2 py-1.5 text-xs font-medium text-white shadow-sm backdrop-blur-md transition-all group-hover:bg-black/60">
+        <span className="truncate drop-shadow-sm">
+          {name}
+          {isLocal ? " (You)" : ""}
         </span>
-        <div className="flex shrink-0 items-center gap-2 opacity-90">
-          {!isMicEnabled && (
-            <div className="rounded-full bg-white/15 p-0.5">
-              <MicOff className="h-3 w-3 text-white" />
-            </div>
-          )}
-          {isScreenSharing && <MonitorUp className="h-3.5 w-3.5" />}
-        </div>
+        {(!isMicEnabled || isScreenSharing || isSpeaking) && (
+          <div className="flex shrink-0 items-center gap-1.5 border-l border-white/20 pl-2">
+            {isSpeaking && <span className="size-2 rounded-full bg-primary animate-pulse" />}
+            {!isMicEnabled && <MicOff className="h-3.5 w-3.5 text-red-400 drop-shadow-sm" />}
+            {isScreenSharing && <MonitorUp className="h-3.5 w-3.5 text-blue-400 drop-shadow-sm" />}
+          </div>
+        )}
       </div>
       <audio ref={audioRef} autoPlay hidden aria-hidden="true" />
     </div>
