@@ -28,6 +28,8 @@ import {
   DrawerContent,
   DrawerClose,
   DrawerTrigger,
+  DrawerTitle,
+  DrawerDescription,
 } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
 
@@ -96,6 +98,8 @@ function DashboardHeader() {
           </DrawerTrigger>
 
           <DrawerContent className="flex h-full w-72 flex-col p-0">
+            <DrawerTitle className="sr-only">Navigation Menu</DrawerTitle>
+            <DrawerDescription className="sr-only">Access dashboard navigation links</DrawerDescription>
             {/* Drawer top bar */}
             <div className="flex items-center justify-between border-b border-border px-4 py-4">
               <Link

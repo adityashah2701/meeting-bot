@@ -15,7 +15,7 @@ const ExcalidrawCanvas = dynamic(
   () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
   {
     ssr: false,
-    loading: () => <LoadingBlock className="h-full w-full rounded-[24px]" />,
+    loading: () => <LoadingBlock className="h-full w-full rounded-4xl" />,
   },
 );
 

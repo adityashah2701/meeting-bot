@@ -18,6 +18,9 @@ export function ScreenShareButton({
       size="icon-lg"
       onClick={onClick}
       disabled={disabled}
+      className="rounded-xl"
+      aria-pressed={active}
+      title={active ? "Stop screen share" : "Share screen"}
     >
       {active ? <MonitorX className="h-4 w-4" /> : <MonitorUp className="h-4 w-4" />}
     </Button>

@@ -18,6 +18,7 @@ export function VideoTile({
   isScreenSharing = false,
   isPresentation = false,
   avatarDensity = "default",
+  variant = "tile",
 }: {
   className?: string;
   stream: MediaStream | null;
@@ -33,6 +34,8 @@ export function VideoTile({
   isScreenSharing?: boolean;
   isPresentation?: boolean;
   avatarDensity?: "default" | "compact" | "grid";
+  /** "pip" renders the floating self-preview chrome (border, shadow, always-compact labels). */
+  variant?: "tile" | "pip";
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -170,15 +173,19 @@ export function VideoTile({
     };
   }, [isLocal, stream]);
 
+  const isPip = variant === "pip";
+
   return (
     <div
       className={cn(
         "@container relative flex h-full transition-all duration-200",
-        isSpeaking && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+        isSpeaking &&
+          "ring-2 ring-primary shadow-[0_0_28px_-6px_var(--color-primary)] ring-offset-1 ring-offset-background",
+        isPip && "rounded-2xl ring-1 ring-background/80 shadow-2xl",
         className,
       )}
     >
-    <div className="relative flex h-full w-full overflow-hidden bg-[#1a1a2e] shadow-lg rounded-[inherit]">
+    <div className="relative flex h-full w-full overflow-hidden bg-[#101018] shadow-lg rounded-[inherit]">
       {shouldRenderVideo ? (
         <video
           ref={videoRef}
@@ -192,13 +199,13 @@ export function VideoTile({
           )}
         />
       ) : (
-        <div className="flex flex-1 items-center justify-center bg-linear-to-br from-[#1a1a2e] to-[#16213e]">
+        <div className="flex flex-1 items-center justify-center bg-linear-to-br from-[#15151f] to-[#0c0c14]">
           <div className="flex flex-col items-center gap-3">
             <div
               className={cn(
                 "rounded-full transition-all duration-300",
                 avatarRingClass,
-                isSpeaking && "ring-2 ring-primary ring-offset-2 ring-offset-[#1a1a2e]",
+                isSpeaking && "ring-2 ring-primary ring-offset-2 ring-offset-[#101018]",
               )}
             >
               <Avatar className={cn(avatarSizeClass, "shadow-md")}>
@@ -208,20 +215,28 @@ export function VideoTile({
                 </AvatarFallback>
               </Avatar>
             </div>
-            <div className={cn("flex items-center gap-1.5 rounded-full bg-black/30 text-white/60 backdrop-blur", cameraOffBadgeClass)}>
-              <VideoOff className="h-3 w-3" />
-              <span>Camera off</span>
-            </div>
+            {!isPip && (
+              <div className={cn("flex items-center gap-1.5 rounded-full bg-black/30 text-white/60 backdrop-blur", cameraOffBadgeClass)}>
+                <VideoOff className="h-3 w-3" />
+                <span>Camera off</span>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Name bar */}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-linear-to-t from-black/80 to-transparent px-3 py-2.5 text-xs text-white">
-        <span className="font-medium drop-shadow">{name}{isLocal ? " (You)" : ""}</span>
-        <div className="flex items-center gap-2 opacity-80">
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-linear-to-t from-black/75 to-transparent px-3 py-2 text-xs text-white">
+        <span className="flex items-center gap-1.5 truncate font-medium drop-shadow">
+          {isSpeaking && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+          <span className="truncate">
+            {name}
+            {isLocal ? " (You)" : ""}
+          </span>
+        </span>
+        <div className="flex shrink-0 items-center gap-2 opacity-90">
           {!isMicEnabled && (
-            <div className="rounded-full bg-red-500/80 p-0.5">
+            <div className="rounded-full bg-white/15 p-0.5">
               <MicOff className="h-3 w-3 text-white" />
             </div>
           )}

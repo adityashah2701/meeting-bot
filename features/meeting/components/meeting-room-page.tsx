@@ -3,21 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
-import { AlertCircle, CircleDot, Clock3, Focus, Lock, Mic, MicOff, MoreHorizontal, PanelRightClose, PanelRightOpen, PenSquare, Pin, Radio, Settings2, ShieldAlert, StopCircle, Subtitles } from "lucide-react";
+import { PenSquare } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { LoadingBlock } from "@/components/shared/loading-block";
 import { useSyncOrganizationBilling } from "@/features/billing/hooks/use-sync-organization-billing";
 import { billingService } from "@/features/billing/services/billing-service";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerClose,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
 import {
   meetingService,
   summarizeTranscript,
@@ -31,8 +23,13 @@ import {
 import { useTranscriptSync } from "@/features/ai/hooks/use-transcript-sync";
 import { useWebrtc } from "@/features/webrtc/hooks/use-webrtc";
 import { ParticipantGrid } from "@/features/webrtc/components/participant-grid";
-import { MeetingControls } from "@/features/webrtc/components/meeting-controls";
-import { MeetingSidePanel } from "@/features/meeting/components/meeting-side-panel";
+import { CommandBar } from "@/features/meeting/components/command-bar";
+import { MoreMenu } from "@/features/meeting/components/more-menu";
+import { RoomShell } from "@/features/meeting/components/room-shell";
+import type { RoomAiStatus } from "@/features/meeting/components/room-top-bar";
+import { ShortcutsDialog } from "@/features/meeting/components/shortcuts-dialog";
+import { useMeetingShortcuts } from "@/features/meeting/hooks/use-meeting-shortcuts";
+import { MeetingSettingsPanel } from "@/features/meeting/components/meeting-settings-panel";
 import { MeetingWhiteboard } from "@/features/meeting/components/meeting-whiteboard";
 import { MeetingReactionsOverlay } from "@/features/meeting/components/meeting-reactions-overlay";
 import type { MeetingReactionEmoji } from "@/features/meeting/lib/reactions";
@@ -134,17 +131,14 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
   const sendReaction = useMutation(meetingService.sendReaction);
 
   const { queuedLines, enqueueTranscript } = useTranscriptSync({ meetingId });
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>("auto");
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
-  const [compactRail, setCompactRail] = useState(false);
-  const [showFloatingTranscript, setShowFloatingTranscript] = useState(false);
-  const [transcriptDock, setTranscriptDock] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
   const [isRecordingMedia, setIsRecordingMedia] = useState(false);
   const [isUploadingRecording, setIsUploadingRecording] = useState(false);
-  const [isViewOptionsOpen, setIsViewOptionsOpen] = useState(false);
   const [isMeetingSettingsOpen, setIsMeetingSettingsOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const dbTranscript = useMemo(() => transcriptRows ?? [], [transcriptRows]);
   const meetingCaptureRootRef = useRef<HTMLDivElement | null>(null);
   const recordingSessionRef = useRef<{
@@ -205,6 +199,12 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     return full;
   }, [dbTranscript, queuedLines]);
 
+  const lastCaptionLine = useMemo(() => {
+    const finalLines = transcript.filter((line) => !line.isInterim);
+    const line = transcript[transcript.length - 1] ?? finalLines[finalLines.length - 1] ?? null;
+    return line ? { id: line.id, sender: line.sender, text: line.text } : null;
+  }, [transcript]);
+
   useEffect(() => {
     setTranscriptionMode(getDefaultTranscriptionMode());
   }, []);
@@ -218,8 +218,8 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     if (finalTranscript.length === 0) return null;
 
     const result = await summarizeTranscript(finalTranscript);
-    await saveSummary({ 
-      meetingId, 
+    await saveSummary({
+      meetingId,
       summary: result.summary,
       key_points: result.key_points,
       decisions: result.decisions,
@@ -253,7 +253,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     return () => window.clearInterval(intervalId);
   }, [buildMeetingArtifacts]);
 
-  const { isListening: isTranscribing, error: transcriptionError } = useTranscription({
+  const { isListening: isTranscribing } = useTranscription({
     // Pause transcription when mic is muted — no point sending silent audio to Whisper
     enabled: Boolean(participantId && meeting?.status !== "ended" && !permissionDenied && !isAudioMuted),
     stream: localStream,
@@ -296,35 +296,6 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
       router.push("/meetings");
     }
   }, [meeting?.status, router]);
-
-  if (meeting === undefined || whiteboard === undefined) return <LoadingBlock className="h-screen w-full" />;
-  if (!meeting) return <div className="p-6 text-sm text-muted-foreground">Meeting not found.</div>;
-
-  const currentParticipantStatus = meeting.currentParticipant?.status ?? participantStatus;
-  const isJoined = currentParticipantStatus === "joined";
-  const isHost = meeting.currentParticipant?.role === "host";
-  const canRecord = isJoined && Boolean(meeting.effectivePermissions?.canStartRecording);
-  const activeRecording = recordings.find((recording) => recording.status === "recording") ?? null;
-  const isRecordingActive = Boolean(activeRecording || isRecordingMedia);
-  const recordingLockedByPlan = billing?.features.recording === false;
-  const canToggleAudio = isJoined && (!isAudioMuted || Boolean(meeting.effectivePermissions?.canUnmuteSelf));
-  const canToggleVideo = isJoined && meeting.currentParticipant?.role !== "viewer";
-  const canShareScreen = isJoined && Boolean(meeting.effectivePermissions?.canShareScreen);
-  const canUseWhiteboard = isJoined && Boolean(meeting.effectivePermissions?.canUseWhiteboard);
-  const showMeetingLockBanner = isJoined && meeting.isLocked;
-  const isWhiteboardOpen = Boolean(whiteboard?.isOpen);
-  const canReact = isJoined && Boolean(meeting.settings.allowReactions);
-  const hasActivePresentation =
-    isScreenSharing || participants.some((participant) => participant.isScreenSharing);
-  const whiteboardOwnerLabel = whiteboard?.updatedByName?.trim() || "Someone";
-  const transcriptDockClass =
-    transcriptDock === "top-left"
-      ? "left-4 top-4"
-      : transcriptDock === "top-right"
-        ? "right-4 top-4"
-        : transcriptDock === "bottom-left"
-          ? "left-4 bottom-28"
-          : "right-4 bottom-28";
 
   const createMeetingViewCaptureStream = async () => {
     const displayMedia = await navigator.mediaDevices.getDisplayMedia({
@@ -553,7 +524,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
 
     try {
       let summaryGenerated = false;
-      if (meeting.status !== "ended") {
+      if (meeting?.status !== "ended") {
         const toastId = toast.loading("Generating summary…");
         const artifacts = await buildMeetingArtifacts().catch(() => null);
         toast.dismiss(toastId);
@@ -577,7 +548,7 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
       }
 
       let summaryGenerated = false;
-      if (meeting.status !== "ended") {
+      if (meeting?.status !== "ended") {
         const toastId = toast.loading("Generating final summary…", { duration: 10000 });
         const artifacts = await buildMeetingArtifacts().catch(() => null);
         await endMeeting({ meetingId });
@@ -743,475 +714,197 @@ export function MeetingRoomPage({ meetingId }: { meetingId: Id<"meetings"> }) {
     }
   };
 
-  return (
-    <div ref={meetingCaptureRootRef} className="flex h-screen flex-col overflow-hidden bg-background">
-      {/* ── Header ── */}
-      <header className="shrink-0 border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
-          {/* Left: title + status */}
-          <div className="flex min-w-0 items-center gap-2.5">
-            <h1 className="truncate text-sm font-semibold text-foreground lg:text-base">{meeting.title}</h1>
-            <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium uppercase text-primary">
-              <Radio className="h-3 w-3" />
-              <span>{meeting.status}</span>
+  const activeRecording = recordings.find((recording) => recording.status === "recording") ?? null;
+  const isRecordingActive = Boolean(activeRecording || isRecordingMedia);
+
+  useMeetingShortcuts({
+    enabled: meeting?.currentParticipant?.status === "joined",
+    onToggleMic: () => void toggleAudio(),
+    onToggleCamera: () => void toggleVideo(),
+    onToggleScreenShare: () => void (isScreenSharing ? stopScreenShare() : startScreenShare()),
+    onTogglePanel: () => setIsSidebarOpen((cur) => !cur),
+    onShowShortcuts: () => setIsShortcutsOpen(true),
+  });
+
+  if (meeting === undefined || whiteboard === undefined) return <LoadingBlock className="h-screen w-full" />;
+  if (!meeting) return <div className="p-6 text-sm text-muted-foreground">Meeting not found.</div>;
+
+  const currentParticipantStatus = meeting.currentParticipant?.status ?? participantStatus;
+  const isJoined = currentParticipantStatus === "joined";
+  const isHost = meeting.currentParticipant?.role === "host";
+  const canRecord = isJoined && Boolean(meeting.effectivePermissions?.canStartRecording);
+  const recordingLockedByPlan = billing?.features.recording === false;
+  const canToggleAudio = isJoined && (!isAudioMuted || Boolean(meeting.effectivePermissions?.canUnmuteSelf));
+  const canToggleVideo = isJoined && meeting.currentParticipant?.role !== "viewer";
+  const canShareScreen = isJoined && Boolean(meeting.effectivePermissions?.canShareScreen);
+  const canUseWhiteboard = isJoined && Boolean(meeting.effectivePermissions?.canUseWhiteboard);
+  const canChangeSettings = Boolean(meeting.effectivePermissions?.canChangeSettings);
+  const isWhiteboardOpen = Boolean(whiteboard?.isOpen);
+  const canReact = isJoined && Boolean(meeting.settings.allowReactions);
+  const hasActivePresentation =
+    isScreenSharing || participants.some((participant) => participant.isScreenSharing);
+  const whiteboardOwnerLabel = whiteboard?.updatedByName?.trim() || "Someone";
+
+  const aiStatus: RoomAiStatus = permissionDenied ? "blocked" : isActivelyTranscribing ? "transcribing" : "idle";
+  const stageBanner =
+    currentParticipantStatus === "waiting"
+      ? "waiting"
+      : currentParticipantStatus === "removed" || currentParticipantStatus === "rejected"
+        ? currentParticipantStatus
+        : null;
+
+  const whiteboardStage =
+    isWhiteboardOpen && !hasActivePresentation ? (
+      <div className="flex h-full min-h-0 flex-col bg-card">
+        <div className="flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm">
+              <PenSquare className="h-3.5 w-3.5 text-primary" />
+              Shared whiteboard
+            </div>
+            <div className="inline-flex items-center rounded-full bg-primary/8 px-3 py-1 text-xs text-muted-foreground">
+              Live for everyone · opened by {whiteboardOwnerLabel}
             </div>
           </div>
-
-          {/* Right: key action + status pills + drawer */}
-          <div className="flex shrink-0 items-center gap-2">
-            {/* Recording controls */}
-            {isRecordingActive ? (
-              <Button
-                size="sm"
-                variant="destructive"
-                className="gap-1.5 rounded-full text-xs"
-                onClick={() => void handleStopRecording()}
-                disabled={isUploadingRecording}
-              >
-                <StopCircle className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{isUploadingRecording ? "Uploading..." : "Stop Rec"}</span>
-              </Button>
-            ) : canRecord ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5 rounded-full text-xs"
-                onClick={() => void handleStartRecording()}
-                disabled={isUploadingRecording || recordingLockedByPlan}
-                title={
-                  recordingLockedByPlan
-                    ? "Recordings are available on paid workspace plans"
-                    : undefined
-                }
-              >
-                <CircleDot className="h-3.5 w-3.5 text-red-500" />
-                <span className="hidden sm:inline">Start Rec</span>
-              </Button>
-            ) : null}
-
-            {/* Transcription pill */}
-            {permissionDenied ? (
-              <div className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive" title="Microphone access denied">
-                <AlertCircle className="h-3 w-3" />
-                <span className="hidden sm:inline">Mic blocked</span>
-              </div>
-            ) : isActivelyTranscribing ? (
-              <div className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-600 dark:text-green-400" title="Transcription active">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
-                </span>
-                <Mic className="h-3 w-3" />
-                <span className="hidden sm:inline">Transcribing</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground" title="Transcription paused">
-                <MicOff className="h-3 w-3" />
-                <span className="hidden sm:inline">Mic off</span>
-              </div>
-            )}
-
-            {transcriptionError && (
-              <div className="hidden text-xs text-destructive" title={transcriptionError} />
-            )}
-
-            {/* Clock pill */}
-            <div className="hidden items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground sm:flex">
-              <Clock3 className="h-3 w-3" />
-              <span>{new Date().toLocaleTimeString()}</span>
-            </div>
-
-            {/* Panel toggle */}
+          {canUseWhiteboard ? (
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               className="gap-1.5 rounded-full text-xs"
-              onClick={() => setIsSidebarOpen((cur) => !cur)}
-              title={isSidebarOpen ? "Hide panel" : "Show panel"}
+              onClick={() => {
+                void setWhiteboardOpen({ meetingId, isOpen: false }).catch((error) => {
+                  toast.error(error instanceof Error ? error.message : "Unable to close whiteboard");
+                });
+              }}
             >
-              {isSidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-              <span className="hidden lg:inline">{isSidebarOpen ? "Hide" : "Show"} Panel</span>
+              <PenSquare className="h-3.5 w-3.5" />
+              Close
             </Button>
-
-            {/* ── View Options Drawer ── */}
-            <Drawer
-              direction="right"
-              open={isViewOptionsOpen}
-              onOpenChange={setIsViewOptionsOpen}
-            >
-              <DrawerTrigger asChild>
-                <Button size="sm" variant="outline" className="gap-1.5 rounded-full text-xs">
-                  <MoreHorizontal className="h-4 w-4" />
-                  <span className="hidden sm:inline">More</span>
-                </Button>
-              </DrawerTrigger>
-              <DrawerContent className="flex h-full w-80 flex-col p-0">
-                <DrawerHeader className="border-b border-border px-4 py-3">
-                  <DrawerTitle className="text-sm font-semibold">View Options</DrawerTitle>
-                </DrawerHeader>
-
-                <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
-                  {/* Focus mode */}
-                  <button
-                    onClick={() => setFocusMode((cur) => !cur)}
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                      focusMode
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border bg-background text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Focus className="h-4 w-4" />
-                      <span>Focus mode</span>
-                    </div>
-                    <span className={`text-xs font-medium ${ focusMode ? "text-primary" : "text-muted-foreground" }`}>
-                      {focusMode ? "On" : "Off"}
-                    </span>
-                  </button>
-
-                  {/* Compact rail */}
-                  <button
-                    onClick={() => setCompactRail((cur) => !cur)}
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                      compactRail
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border bg-background text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Pin className="h-4 w-4" />
-                      <span>Compact rail</span>
-                    </div>
-                    <span className={`text-xs font-medium ${ compactRail ? "text-primary" : "text-muted-foreground" }`}>
-                      {compactRail ? "On" : "Off"}
-                    </span>
-                  </button>
-
-                  {/* Floating transcript */}
-                  <button
-                    onClick={() => setShowFloatingTranscript((cur) => !cur)}
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                      showFloatingTranscript
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border bg-background text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Subtitles className="h-4 w-4" />
-                      <span>Floating transcript</span>
-                    </div>
-                    <span className={`text-xs font-medium ${ showFloatingTranscript ? "text-primary" : "text-muted-foreground" }`}>
-                      {showFloatingTranscript ? "On" : "Off"}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      if (!canUseWhiteboard) {
-                        return;
-                      }
-                      void setWhiteboardOpen({
-                        meetingId,
-                        isOpen: !isWhiteboardOpen,
-                      }).catch((error) => {
-                        toast.error(
-                          error instanceof Error
-                            ? error.message
-                            : "Unable to update whiteboard",
-                        );
-                      });
-                    }}
-                    disabled={!canUseWhiteboard || (hasActivePresentation && !isWhiteboardOpen)}
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                      isWhiteboardOpen
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border bg-background text-foreground hover:bg-muted"
-                    } ${
-                      !canUseWhiteboard || (hasActivePresentation && !isWhiteboardOpen)
-                        ? "cursor-not-allowed opacity-50"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <PenSquare className="h-4 w-4" />
-                      <span>Shared whiteboard</span>
-                    </div>
-                    <span className={`text-xs font-medium ${ isWhiteboardOpen ? "text-primary" : "text-muted-foreground" }`}>
-                      {isWhiteboardOpen ? `Live by ${whiteboardOwnerLabel}` : "Off"}
-                    </span>
-                  </button>
-                  {hasActivePresentation && !isWhiteboardOpen ? (
-                    <p className="px-1 text-xs text-muted-foreground">
-                      Stop screen sharing before opening the whiteboard.
-                    </p>
-                  ) : !canUseWhiteboard ? (
-                    <p className="px-1 text-xs text-muted-foreground">
-                      Only the host can enable member whiteboard access in meeting settings.
-                    </p>
-                  ) : null}
-
-                  {/* Transcript dock position — only visible when floating transcript is on */}
-                  {showFloatingTranscript ? (
-                    <div className="mt-1 rounded-lg border border-border bg-background px-3 py-2.5">
-                      <p className="mb-2 text-xs font-medium text-muted-foreground">Transcript position</p>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((pos) => (
-                          <button
-                            key={pos}
-                            onClick={() => setTranscriptDock(pos)}
-                            className={`rounded-md border px-2 py-1.5 text-xs capitalize transition-colors ${
-                              transcriptDock === pos
-                                ? "border-primary/40 bg-primary/10 text-primary"
-                                : "border-border text-muted-foreground hover:bg-muted"
-                            }`}
-                          >
-                            {pos.replace("-", " ")}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Pin participant */}
-                  <div className="mt-1 rounded-lg border border-border bg-background px-3 py-2.5">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">Pin participant</p>
-                    <select
-                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-                      value={pinnedParticipantId ?? ""}
-                      onChange={(event) => setPinnedParticipantId(event.target.value || null)}
-                    >
-                      <option value="">No pin</option>
-                      {participants.map((participant) => (
-                        <option key={participant._id} value={participant._id}>
-                          {participant.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Meeting Settings — only for hosts/co-hosts */}
-                  {Boolean(meeting.effectivePermissions?.canChangeSettings) ? (
-                    <button
-                      onClick={() => {
-                        setIsViewOptionsOpen(false);
-                        window.setTimeout(() => {
-                          setIsMeetingSettingsOpen(true);
-                        }, 0);
-                      }}
-                      className="mt-2 flex w-full items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      <Settings2 className="h-4 w-4 text-muted-foreground" />
-                      <span>Meeting Settings</span>
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="border-t border-border px-4 py-3">
-                  <DrawerClose asChild>
-                    <Button variant="outline" className="w-full text-sm">Close</Button>
-                  </DrawerClose>
-                </div>
-              </DrawerContent>
-            </Drawer>
-          </div>
+          ) : null}
         </div>
-
-        {/* Permissions denied banner */}
-        {permissionDenied && (
-          <div className="mt-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Camera/microphone access is blocked. Click the 🔒 lock icon in your browser&apos;s address bar,
-              allow mic &amp; camera, then{" "}
-              <button
-                className="underline underline-offset-2 font-medium"
-                onClick={() => window.location.reload()}
-              >
-                refresh
-              </button>
-              .
-            </span>
-          </div>
-        )}
-      </header>
-
-      {/* ── Main body ── */}
-      <div className="flex min-h-0 flex-1 overflow-hidden pb-24">
-        <div className="min-h-0 flex-1 overflow-hidden p-3 lg:p-5">
-          {currentParticipantStatus === "waiting" ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center">
-                <ShieldAlert className="mx-auto h-10 w-10 text-amber-500" />
-                <h2 className="mt-4 text-xl font-semibold text-foreground">Waiting for admission</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  You&apos;re in the lobby. A host or co-host needs to admit you before media connects.
-                </p>
-                <Button className="mt-6" variant="outline" onClick={() => void handleLeave()}>
-                  Leave room
-                </Button>
-              </div>
-            </div>
-          ) : currentParticipantStatus === "removed" || currentParticipantStatus === "rejected" ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="max-w-md rounded-2xl border border-destructive/30 bg-destructive/5 p-8 text-center">
-                <AlertCircle className="mx-auto h-10 w-10 text-destructive" />
-                <h2 className="mt-4 text-xl font-semibold text-foreground">Meeting access unavailable</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {currentParticipantStatus === "removed"
-                    ? "A host or co-host removed you from this meeting."
-                    : "Your join request was rejected."}
-                </p>
-                <Button className="mt-6" variant="outline" onClick={() => void handleLeave()}>
-                  Return to meetings
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="h-full min-h-0">
-              {showMeetingLockBanner ? (
-                <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                  <Lock className="h-3.5 w-3.5 shrink-0" />
-                  <span>The meeting is locked. New participants cannot join until a host unlocks it.</span>
-                </div>
-              ) : null}
-              <div className="relative h-full min-h-0">
-                <ParticipantGrid
-                  localStream={localStream}
-                  cameraStream={cameraStream}
-                  presentationStream={presentationStream}
-                  remoteCameraStreams={remoteCameraStreams}
-                  remotePresentationStreams={remotePresentationStreams}
-                  participants={participants}
-                  localParticipantId={participantId}
-                  pinnedParticipantId={pinnedParticipantId}
-                  focusMode={focusMode}
-                  compactRail={compactRail}
-                  stage={
-                    isWhiteboardOpen && !hasActivePresentation ? (
-                      <div className="flex h-full min-h-0 flex-col bg-white">
-                        <div className="flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-2.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm">
-                              <PenSquare className="h-3.5 w-3.5 text-primary" />
-                              Shared whiteboard
-                            </div>
-                            <div className="inline-flex items-center rounded-full bg-primary/8 px-3 py-1 text-xs text-muted-foreground">
-                              Live for everyone · opened by {whiteboardOwnerLabel}
-                            </div>
-                          </div>
-                          {canUseWhiteboard ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5 rounded-full text-xs"
-                              onClick={() => {
-                                void setWhiteboardOpen({ meetingId, isOpen: false }).catch((error) => {
-                                  toast.error(
-                                    error instanceof Error
-                                      ? error.message
-                                      : "Unable to close whiteboard",
-                                  );
-                                });
-                              }}
-                            >
-                              <PenSquare className="h-3.5 w-3.5" />
-                              Close
-                            </Button>
-                          ) : null}
-                        </div>
-                        <div className="min-h-0 flex-1">
-                          <MeetingWhiteboard
-                            meetingId={meetingId}
-                            canEdit={canUseWhiteboard}
-                            serializedScene={whiteboard?.scene ?? null}
-                            onSaveScene={async (scene) => {
-                              try {
-                                await saveWhiteboardScene({ meetingId, scene });
-                              } catch (error) {
-                                console.error("Unable to sync whiteboard", error);
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ) : undefined
-                  }
-                />
-                {isJoined ? (
-                  <MeetingReactionsOverlay reactions={liveReactions ?? []} />
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Side panel — always mounted, slides in/out via width + opacity transition */}
-        <div
-          className={`min-h-0 shrink-0 overflow-hidden border-l border-border bg-card transition-all duration-300 ease-in-out ${
-            isSidebarOpen &&
-            currentParticipantStatus !== "removed" &&
-            currentParticipantStatus !== "rejected"
-              ? "w-[360px] opacity-100"
-              : "w-0 opacity-0"
-          }`}
-        >
-          <div className="h-full w-[360px]">
-            <MeetingSidePanel
+        <div className="min-h-0 flex-1 bg-card p-2">
+          <div className="h-full w-full overflow-hidden rounded-xl">
+            <MeetingWhiteboard
               meetingId={meetingId}
-              transcript={transcript}
-              orgId={meeting.orgId}
-              isActivelyTranscribing={isActivelyTranscribing}
-              transcriptionMode={transcriptionMode}
-              onTranscriptionModeChange={setTranscriptionMode}
-              settingsOpen={isMeetingSettingsOpen}
-              onSettingsOpenChange={setIsMeetingSettingsOpen}
+              canEdit={canUseWhiteboard}
+              serializedScene={whiteboard?.scene ?? null}
+              onSaveScene={async (scene) => {
+                try {
+                  await saveWhiteboardScene({ meetingId, scene });
+                } catch (error) {
+                  console.error("Unable to sync whiteboard", error);
+                }
+              }}
             />
           </div>
         </div>
       </div>
+    ) : undefined;
 
-      {/* ── Floating controls ── */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
-        <div className="pointer-events-auto">
-          <MeetingControls
-            isAudioMuted={isAudioMuted}
-            isVideoOff={isVideoOff}
-            isScreenSharing={isScreenSharing}
-            isHost={isHost}
-            canToggleAudio={canToggleAudio}
-            canToggleVideo={canToggleVideo}
-            canShareScreen={canShareScreen}
-            canReact={canReact}
-            onToggleAudio={() => void toggleAudio()}
-            onToggleVideo={() => void toggleVideo()}
-            onToggleScreenShare={() => void (isScreenSharing ? stopScreenShare() : startScreenShare())}
-            onSendReaction={(emoji) => void handleSendReaction(emoji)}
-            onLeave={() => void handleLeave()}
-            onEndMeeting={() => void handleEndMeeting()}
-          />
-        </div>
-      </div>
-
-      {showFloatingTranscript ? (
-        <div className={`fixed z-40 w-80 rounded-xl border border-border bg-card/95 p-3 shadow-xl backdrop-blur ${transcriptDockClass}`}>
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Live Transcript
-            </p>
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setShowFloatingTranscript(false)}>
-              Close
-            </Button>
-          </div>
-          <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
-            {transcript.slice(-12).map((line) => (
-              <div key={line.id} className="rounded-md border border-border/70 px-2 py-1.5">
-                <p className="text-[11px] text-muted-foreground">{line.sender}</p>
-                <p className="text-xs text-foreground">{line.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+  const stage = (
+    <div className="relative h-full min-h-0">
+      <ParticipantGrid
+        localStream={localStream}
+        cameraStream={cameraStream}
+        presentationStream={presentationStream}
+        remoteCameraStreams={remoteCameraStreams}
+        remotePresentationStreams={remotePresentationStreams}
+        participants={participants}
+        localParticipantId={participantId}
+        pinnedParticipantId={pinnedParticipantId}
+        focusMode={focusMode}
+        stage={whiteboardStage}
+      />
+      {isJoined ? <MeetingReactionsOverlay reactions={liveReactions ?? []} /> : null}
     </div>
+  );
+
+  const moreMenu = (
+    <MoreMenu
+      focusMode={focusMode}
+      onFocusModeChange={setFocusMode}
+      isWhiteboardOpen={isWhiteboardOpen}
+      canUseWhiteboard={canUseWhiteboard}
+      hasActivePresentation={hasActivePresentation}
+      whiteboardOwnerLabel={whiteboardOwnerLabel}
+      onToggleWhiteboard={() => {
+        if (!canUseWhiteboard) return;
+        void setWhiteboardOpen({ meetingId, isOpen: !isWhiteboardOpen }).catch((error) => {
+          toast.error(error instanceof Error ? error.message : "Unable to update whiteboard");
+        });
+      }}
+      participants={participants}
+      pinnedParticipantId={pinnedParticipantId}
+      onPinnedParticipantChange={setPinnedParticipantId}
+      canChangeSettings={canChangeSettings}
+      onOpenSettings={() => setIsMeetingSettingsOpen(true)}
+      onOpenShortcuts={() => setIsShortcutsOpen(true)}
+    />
+  );
+
+  const commandBar = (
+    <CommandBar
+      isAudioMuted={isAudioMuted}
+      isVideoOff={isVideoOff}
+      isScreenSharing={isScreenSharing}
+      isHost={isHost}
+      canToggleAudio={canToggleAudio}
+      canToggleVideo={canToggleVideo}
+      canShareScreen={canShareScreen}
+      canReact={canReact}
+      onToggleAudio={() => void toggleAudio()}
+      onToggleVideo={() => void toggleVideo()}
+      onToggleScreenShare={() => void (isScreenSharing ? stopScreenShare() : startScreenShare())}
+      onSendReaction={(emoji) => void handleSendReaction(emoji)}
+      onLeave={() => void handleLeave()}
+      onEndMeeting={() => void handleEndMeeting()}
+      showRecordToggle={canRecord || isRecordingActive}
+      isRecordingActive={isRecordingActive}
+      isRecordingDisabled={isUploadingRecording}
+      recordingLockedByPlan={recordingLockedByPlan}
+      onToggleRecording={() =>
+        void (isRecordingActive ? handleStopRecording() : handleStartRecording())
+      }
+      moreMenu={moreMenu}
+    />
+  );
+
+  return (
+    <>
+      <RoomShell
+        captureRootRef={meetingCaptureRootRef}
+        title={meeting.title}
+        isLive={meeting.status === "active"}
+        startedAt={meeting.startedAt}
+        topBarParticipants={participants}
+        aiStatus={aiStatus}
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={() => setIsSidebarOpen((cur) => !cur)}
+        lockedBanner={isJoined && meeting.isLocked}
+        blockedBanner={permissionDenied}
+        onRefreshPermissions={() => window.location.reload()}
+        stageBanner={stageBanner}
+        onStageBannerAction={() => void handleLeave()}
+        stage={stage}
+        captionLine={isActivelyTranscribing ? lastCaptionLine : null}
+        meetingId={meetingId}
+        orgId={meeting.orgId}
+        transcript={transcript}
+        isActivelyTranscribing={isActivelyTranscribing}
+        transcriptionMode={transcriptionMode}
+        onTranscriptionModeChange={setTranscriptionMode}
+        commandBar={commandBar}
+      />
+
+      <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen} />
+
+      {canChangeSettings ? (
+        <MeetingSettingsPanel
+          meetingId={meetingId}
+          open={isMeetingSettingsOpen}
+          onOpenChange={setIsMeetingSettingsOpen}
+        />
+      ) : null}
+    </>
   );
 }

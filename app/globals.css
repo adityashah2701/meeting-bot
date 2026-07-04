@@ -132,6 +132,9 @@
   [id] {
     scroll-margin-top: 80px;
   }
+  button {
+    cursor: pointer;
+  }
 }
 
 /* ════════════════════════════════════════════════
@@ -156,4 +159,51 @@
 .mask-fade-out {
   mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+}
+
+/* ════════════════════════════════════════════════
+   MEETING ROOM — MOTION TOKENS + REACTION OVERLAY
+═══════════════════════════════════════════════ */
+
+:root {
+  --meeting-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --meeting-motion-fast: 150ms;
+  --meeting-motion-medium: 200ms;
+}
+
+@keyframes meeting-reaction-rise {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.85);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--reaction-drift), -22rem) rotate(var(--reaction-rotation)) scale(var(--reaction-scale));
+    opacity: 0;
+  }
+}
+
+@keyframes meeting-reaction-pop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.meeting-reaction-float {
+  left: var(--reaction-x);
+  animation: meeting-reaction-rise var(--reaction-duration) var(--meeting-ease-out) var(--reaction-delay) both;
+}
+
+.meeting-reaction-bubble {
+  animation: meeting-reaction-pop 220ms var(--meeting-ease-out) both;
 }
