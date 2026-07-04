@@ -255,17 +255,30 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     await assertOrgAccess(ctx, identity.tokenIdentifier, args.orgId);
-    const billing: {
-      maxMeetings: number | null;
-      features: {
-        googleCalendarSync: boolean;
-      };
-      usage: {
-        meetingsLimitReached: boolean;
-      };
-    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
-      orgId: args.orgId,
-    });
+    // Read billing directly — ctx.runQuery does NOT forward auth to sub-queries,
+    // so calling getOrganizationPlan (which calls requireIdentity) would throw.
+    const billingSnapshot = await ctx.db
+      .query("organization_billing_snapshots")
+      .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
+      .unique();
+
+    const maxMeetings = billingSnapshot?.maxMeetings ?? 10; // starter default
+    const googleCalendarSyncEnabled =
+      billingSnapshot?.features?.googleCalendarSync ?? false;
+
+    // Derive meetingsLimitReached by counting existing meetings (same logic as getOrganizationPlan).
+    const existingMeetings = await ctx.db
+      .query("meetings")
+      .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
+      .take(maxMeetings + 1);
+    const meetingsLimitReached =
+      typeof maxMeetings === "number" && existingMeetings.length >= maxMeetings;
+
+    const billing = {
+      maxMeetings: billingSnapshot?.maxMeetings ?? maxMeetings,
+      features: { googleCalendarSync: googleCalendarSyncEnabled },
+      usage: { meetingsLimitReached },
+    };
     const now = Date.now();
     const isScheduled =
       typeof args.scheduledFor === "number" && args.scheduledFor > now;
@@ -989,15 +1002,17 @@ export const saveSummary = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     const meeting = await assertMeetingAccess(ctx, identity.tokenIdentifier, args.meetingId);
-    const billing: {
-      features: {
-        aiSummary: boolean;
-      };
-    } = await ctx.runQuery(api.billing.index.getOrganizationPlan, {
-      orgId: meeting.orgId,
-    });
 
-    if (!billing.features.aiSummary) {
+    // Check billing directly — ctx.runQuery does NOT forward auth to sub-queries,
+    // so calling getOrganizationPlan (which calls requireIdentity internally) would
+    // throw "Unauthenticated". Instead we inline the billing snapshot read here.
+    const billingSnapshot = await ctx.db
+      .query("organization_billing_snapshots")
+      .withIndex("by_orgId", (q) => q.eq("orgId", meeting.orgId))
+      .unique();
+
+    const aiSummaryEnabled = billingSnapshot?.features?.aiSummary ?? false;
+    if (!aiSummaryEnabled) {
       throw new Error("AI summaries are only available on paid workspace plans");
     }
 
