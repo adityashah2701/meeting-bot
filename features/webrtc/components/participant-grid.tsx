@@ -143,26 +143,24 @@ export function ParticipantGrid({
     return (
       <div className="@container flex h-full min-h-0 flex-col gap-3">
         {/* Main presentation area */}
-        <div className="min-h-0 flex-1">
-          <AspectRatio ratio={16 / 9} className="h-full max-h-full">
-            <VideoTile
-              className="h-full rounded-xl"
-              stream={
-                screenSharer._id === localParticipantId
-                  ? presentationStream
-                  : remotePresentationStreams[screenSharer._id] ??
-                    remoteCameraStreams[screenSharer._id] ??
-                    null
-              }
-              name={screenSharer.name}
-              imageUrl={screenSharer.imageUrl}
-              isLocal={screenSharer._id === localParticipantId}
-              isMicEnabled={screenSharer.isMicEnabled}
-              isCameraEnabled={screenSharer.isCameraEnabled}
-              isScreenSharing={screenSharer.isScreenSharing}
-              isPresentation
-            />
-          </AspectRatio>
+        <div className="min-h-0 flex-1 rounded-xl overflow-hidden bg-black/50">
+          <VideoTile
+            className="h-full w-full"
+            stream={
+              screenSharer._id === localParticipantId
+                ? presentationStream
+                : remotePresentationStreams[screenSharer._id] ??
+                  remoteCameraStreams[screenSharer._id] ??
+                  null
+            }
+            name={screenSharer.name}
+            imageUrl={screenSharer.imageUrl}
+            isLocal={screenSharer._id === localParticipantId}
+            isMicEnabled={screenSharer.isMicEnabled}
+            isCameraEnabled={screenSharer.isCameraEnabled}
+            isScreenSharing={screenSharer.isScreenSharing}
+            isPresentation
+          />
         </div>
 
         <FilmstripRail>
@@ -203,11 +201,9 @@ export function ParticipantGrid({
     return (
       <div className="@container flex h-full min-h-0 flex-col gap-3">
         <div className="min-h-0 flex-1">
-          <AspectRatio ratio={16 / 9} className="h-full max-h-full">
-            <div className="h-full overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
-              {stage}
-            </div>
-          </AspectRatio>
+          <div className="h-full w-full overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+            {stage}
+          </div>
         </div>
 
         <FilmstripRail>
@@ -232,24 +228,22 @@ export function ParticipantGrid({
     const rail = allParticipants.filter((p) => p._id !== pinnedParticipant._id);
     return (
       <div className="@container flex h-full min-h-0 flex-col gap-3">
-        <div className="min-h-0 flex-1">
-          <AspectRatio ratio={16 / 9} className="h-full max-h-full">
-            <VideoTile
-              className="h-full rounded-xl"
-              stream={
-                pinnedParticipant._id === localParticipantId
-                  ? cameraStream
-                  : (remoteCameraStreams[pinnedParticipant._id] ?? null)
-              }
-              audioStream={pinnedParticipant._id === localParticipantId ? localStream : undefined}
-              name={pinnedParticipant.name}
-              imageUrl={pinnedParticipant.imageUrl}
-              isLocal={pinnedParticipant._id === localParticipantId}
-              isMicEnabled={pinnedParticipant.isMicEnabled}
-              isCameraEnabled={pinnedParticipant.isCameraEnabled}
-              isScreenSharing={pinnedParticipant.isScreenSharing}
-            />
-          </AspectRatio>
+        <div className="min-h-0 flex-1 rounded-xl overflow-hidden">
+          <VideoTile
+            className="h-full w-full"
+            stream={
+              pinnedParticipant._id === localParticipantId
+                ? cameraStream
+                : (remoteCameraStreams[pinnedParticipant._id] ?? null)
+            }
+            audioStream={pinnedParticipant._id === localParticipantId ? localStream : undefined}
+            name={pinnedParticipant.name}
+            imageUrl={pinnedParticipant.imageUrl}
+            isLocal={pinnedParticipant._id === localParticipantId}
+            isMicEnabled={pinnedParticipant.isMicEnabled}
+            isCameraEnabled={pinnedParticipant.isCameraEnabled}
+            isScreenSharing={pinnedParticipant.isScreenSharing}
+          />
         </div>
         <FilmstripRail>
           {rail.map((p) => {
