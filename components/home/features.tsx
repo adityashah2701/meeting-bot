@@ -1,259 +1,389 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import React from "react";
-import {
-  BrainCircuit,
-  CalendarDays,
-  CheckSquare,
-  FileText,
-  Radio,
-  Shield,
-  Users,
-  Zap,
-} from "lucide-react";
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import { Calendar, FileText, Bot, CheckCircle2, Mic } from "lucide-react";
+import { FadeIn, ScreenshotFrame } from "@/components/home/sections";
+import { cn } from "@/lib/utils";
 
-const features = [
-  {
-    icon: Radio,
-    title: "Real-time Transcription",
-    desc: "Every word captured live with speaker diarization across 40+ languages. Instant, searchable, and accurate.",
-    accent: "emerald",
-  },
-  {
-    icon: BrainCircuit,
-    title: "AI-Powered Summaries",
-    desc: "LLM extracts key decisions, action items, and dates — hours of discussion into concise, structured notes.",
-    accent: "violet",
-  },
-  {
-    icon: CheckSquare,
-    title: "Action Item Tracking",
-    desc: "Tasks auto-created from context with assignees and due dates. Nothing slips through the cracks.",
-    accent: "amber",
-  },
-  {
-    icon: Users,
-    title: "Team Workspaces",
-    desc: "Invite your team, share recordings, and search your organization's entire conversation history.",
-    accent: "blue",
-  },
-  {
-    icon: CalendarDays,
-    title: "Calendar Integration",
-    desc: "Sync with Google Calendar. Meeting links, attendees, and reminders flow in automatically.",
-    accent: "rose",
-  },
-  {
-    icon: FileText,
-    title: "Notion Export",
-    desc: "Ship summaries, transcripts, recordings, and action items directly into your Notion workspace.",
-    accent: "slate",
-  },
+/* ─────────────────────────────────────────────
+   FAKE UI MOCKUP COMPONENTS
+───────────────────────────────────────────── */
+const transcriptLines = [
+  { id: 1, name: "Alice", text: "Let's review the Q3 roadmap.", color: "bg-blue-500" },
+  { id: 2, name: "Bob", text: "I think we need to prioritize the new dashboard.", color: "bg-emerald-500" },
+  { id: 3, name: "Alice", text: "Agreed. Can we get that done by August?", color: "bg-blue-500" },
+  { id: 4, name: "Charlie", text: "I'll coordinate with the design team today.", color: "bg-purple-500" },
 ];
 
-const accentMap: Record<string, { icon: string; bg: string; border: string; glow: string }> = {
-  emerald: { icon: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/[0.08]", border: "border-emerald-500/20", glow: "group-hover:shadow-emerald-500/[0.06]" },
-  violet:  { icon: "text-violet-600 dark:text-violet-400",  bg: "bg-violet-500/[0.08]",  border: "border-violet-500/20",  glow: "group-hover:shadow-violet-500/[0.06]"  },
-  amber:   { icon: "text-amber-600 dark:text-amber-400",   bg: "bg-amber-500/[0.08]",   border: "border-amber-500/20",   glow: "group-hover:shadow-amber-500/[0.06]"   },
-  blue:    { icon: "text-blue-600 dark:text-blue-400",     bg: "bg-blue-500/[0.08]",    border: "border-blue-500/20",    glow: "group-hover:shadow-blue-500/[0.06]"    },
-  rose:    { icon: "text-rose-600 dark:text-rose-400",     bg: "bg-rose-500/[0.08]",    border: "border-rose-500/20",    glow: "group-hover:shadow-rose-500/[0.06]"    },
-  slate:   { icon: "text-slate-600 dark:text-slate-400",   bg: "bg-slate-500/[0.08]",   border: "border-slate-500/20",   glow: "group-hover:shadow-slate-500/[0.06]"   },
-};
+function AnimatedTranscript() {
+  return (
+    <div className="absolute inset-0 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden mask-fade-out">
+      {transcriptLines.map((line) => (
+        <motion.div
+          key={line.id}
+          whileHover={{ scale: 1.02, x: 4 }}
+          transition={{ type: "spring", stiffness: 400, damping: 30 }}
+          className="flex gap-3 items-start cursor-default"
+        >
+          <div className={`h-8 w-8 rounded-full ${line.color} flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm`}>
+            {line.name[0]}
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{line.name}</span>
+            <div className="bg-background/80 backdrop-blur-md p-3 rounded-xl rounded-tl-none border border-border/50 text-[13px] text-foreground shadow-sm">
+              {line.text}
+            </div>
+          </div>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
 
-const stats = [
-  { value: "99%", label: "Transcription accuracy" },
-  { value: "40+", label: "Languages supported" },
-  { value: "<3s", label: "Summary generation" },
-  { value: "∞", label: "Meetings archived" },
-];
+function AnimatedSummary() {
+  return (
+    <div className="absolute inset-0 px-5 pb-5 pt-0 sm:px-7 sm:pb-7 flex flex-col overflow-hidden mask-fade-out">
+       <div className="flex items-center gap-2 border-b border-border/50 pb-4 mb-4">
+         <Bot className="h-4 w-4 text-foreground" />
+         <span className="font-semibold text-sm">Meeting Summary</span>
+       </div>
+       
+       <div className="flex flex-col gap-6">
+         <motion.div whileHover={{ x: 2 }}>
+           <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">Key Decisions</h4>
+           <ul className="text-[13px] flex flex-col gap-3 cursor-default">
+             <li className="flex gap-2.5 items-start group">
+               <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0 group-hover:scale-110 transition-transform"/> 
+               <span className="text-foreground/90 group-hover:text-foreground transition-colors">Q3 Launch officially delayed to mid-August</span>
+             </li>
+             <li className="flex gap-2.5 items-start group">
+               <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0 group-hover:scale-110 transition-transform"/> 
+               <span className="text-foreground/90 group-hover:text-foreground transition-colors">Adopt new minimalist design system</span>
+             </li>
+           </ul>
+         </motion.div>
+         
+         <motion.div whileHover={{ x: 2 }}>
+           <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">Action Items</h4>
+           <div className="flex flex-col gap-2">
+             <div className="flex items-center gap-3 text-[13px] p-2.5 bg-background rounded-lg border border-border shadow-sm group cursor-default">
+               <div className="h-3.5 w-3.5 rounded-[4px] border border-muted-foreground/40 group-hover:border-emerald-500 transition-colors" />
+               <span className="text-foreground/90 font-medium group-hover:text-foreground transition-colors">Update marketing copy</span>
+               <div className="ml-auto text-[10px] font-semibold bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full group-hover:bg-blue-500 group-hover:text-white transition-colors">Alice</div>
+             </div>
+           </div>
+         </motion.div>
+       </div>
+    </div>
+  );
+}
 
-const steps = [
-  {
-    number: "01",
-    title: "Start a meeting room",
-    desc: 'Click "Start Meeting" from your dashboard. An instant live room — no setup needed.',
-    icon: Zap,
-  },
-  {
-    number: "02",
-    title: "Talk naturally",
-    desc: "Meeting Bot transcribes every speaker in real-time with timestamps and diarization.",
-    icon: Radio,
-  },
-  {
-    number: "03",
-    title: "Get your summary",
-    desc: "AI generates a structured summary with decisions, action items, and key points.",
-    icon: BrainCircuit,
-  },
-  {
-    number: "04",
-    title: "Sync everywhere",
-    desc: "Push summaries to Notion, track tasks in your dashboard, and share with your team.",
-    icon: Shield,
-  },
-];
+function AnimatedActionItems() {
+  return (
+    <div className="absolute inset-0 px-6 pb-6 pt-0 flex flex-col gap-3 overflow-hidden mask-fade-out">
+      <div className="flex items-center gap-3 text-[13px] p-3 bg-background rounded-lg border border-border shadow-sm transform transition-all hover:scale-[1.02]">
+        <div className="h-4 w-4 rounded-sm border border-emerald-500 bg-emerald-500/10 flex items-center justify-center shrink-0">
+          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+        </div>
+        <span className="text-foreground/90 font-medium">Update marketing copy</span>
+        <div className="ml-auto h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center text-[9px] text-white font-bold shrink-0">A</div>
+      </div>
+      <div className="flex items-center gap-3 text-[13px] p-3 bg-background rounded-lg border border-border shadow-sm transform transition-all hover:scale-[1.02]">
+        <div className="h-4 w-4 rounded-sm border border-muted-foreground/40 shrink-0" />
+        <span className="text-foreground/90 font-medium">Review Q3 Budget</span>
+        <div className="ml-auto h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center text-[9px] text-white font-bold shrink-0">B</div>
+      </div>
+      <div className="flex items-center gap-3 text-[13px] p-3 bg-background rounded-lg border border-border shadow-sm transform transition-all hover:scale-[1.02]">
+        <div className="h-4 w-4 rounded-sm border border-muted-foreground/40 shrink-0" />
+        <span className="text-foreground/90 font-medium">Schedule offsite</span>
+        <div className="ml-auto h-5 w-5 rounded-full bg-purple-500 flex items-center justify-center text-[9px] text-white font-bold shrink-0">C</div>
+      </div>
+    </div>
+  );
+}
+
+function AnimatedSpeakerId() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+      <div className="relative flex items-center justify-center w-full h-full group">
+        {/* Central mic */}
+        <div className="absolute z-20 h-12 w-12 rounded-full bg-background border border-border shadow-lg flex items-center justify-center group-hover:scale-110 group-hover:shadow-[0_0_20px_rgba(var(--foreground),0.1)] transition-all duration-500">
+           <Mic className="h-5 w-5 text-foreground" />
+        </div>
+        
+        {/* Hover avatars */}
+        <div 
+           className="absolute z-10 -ml-24 -mt-16 h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm shadow-md transition-transform duration-500 group-hover:-translate-x-2 group-hover:-translate-y-2 cursor-default"
+        >A</div>
+        <div 
+           className="absolute z-10 ml-24 -mt-8 h-8 w-8 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold text-xs shadow-md transition-transform duration-500 group-hover:translate-x-2 group-hover:-translate-y-1 cursor-default"
+        >B</div>
+        <div 
+           className="absolute z-10 -ml-16 mt-20 h-11 w-11 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold text-sm shadow-md transition-transform duration-500 group-hover:-translate-x-1 group-hover:translate-y-2 cursor-default"
+        >C</div>
+
+        {/* Hover Ripples */}
+        <div 
+           className="absolute z-0 h-12 w-12 rounded-full border border-foreground/20 bg-foreground/5 pointer-events-none transition-all duration-700 opacity-0 group-hover:scale-[2.5] group-hover:opacity-50"
+        />
+        <div 
+           className="absolute z-0 h-12 w-12 rounded-full border border-foreground/20 bg-foreground/5 pointer-events-none transition-all duration-1000 opacity-0 group-hover:scale-[3.5] group-hover:opacity-30 delay-100"
+        />
+      </div>
+    </div>
+  );
+}
+
+function BentoCard({
+  className,
+  title,
+  description,
+  children,
+  delay = 0,
+}: {
+  className?: string;
+  title: string;
+  description: string;
+  children?: React.ReactNode;
+  delay?: number;
+}) {
+  return (
+    <FadeIn delay={delay} className={cn("w-full h-full", className)}>
+      <motion.div
+        whileHover={{ scale: 1.01, y: -2 }}
+        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        className="relative w-full h-full overflow-hidden rounded-2xl md:rounded-[2rem] border border-border/40 bg-background/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_40px_rgb(0,0,0,0.08)] flex flex-col group"
+      >
+        <div className="absolute inset-0 rounded-2xl md:rounded-[2rem] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] pointer-events-none z-20" />
+        <div className="absolute inset-0 bg-linear-to-br from-muted/30 to-muted/10 backdrop-blur-md pointer-events-none z-10" />
+        
+        <div className="relative z-30 p-6 sm:p-8 flex flex-col gap-2 shrink-0">
+          <h3 className="text-2xl font-semibold tracking-tighter text-foreground leading-[1.1]">{title}</h3>
+          <p className="text-[15px] text-muted-foreground font-normal tracking-wide max-w-[400px]">{description}</p>
+        </div>
+        
+        <div className="relative flex-1 w-full min-h-[220px] z-30 overflow-hidden">
+          {children}
+        </div>
+      </motion.div>
+    </FadeIn>
+  );
+}
+
+function BentoGridSection() {
+  return (
+    <section className="w-full py-24 md:py-32">
+       <div className="max-w-[1200px] mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+         
+         {/* Row 1 */}
+         <BentoCard 
+           className="md:col-span-2 min-h-[380px]" 
+           title="Live stream. Perfect memory." 
+           description="Every voice is captured, identified, and transcribed instantly. You focus on the conversation."
+         >
+           <AnimatedTranscript />
+         </BentoCard>
+
+         <BentoCard 
+           className="md:col-span-1 min-h-[380px]" 
+           delay={0.1}
+           title="Speaker ID" 
+           description="Advanced voice isolation distinguishes between multiple speakers perfectly."
+         >
+           <AnimatedSpeakerId />
+         </BentoCard>
+
+         {/* Row 2 */}
+         <BentoCard 
+           className="md:col-span-1 min-h-[380px]" 
+           delay={0.2}
+           title="Action Items" 
+           description="Tasks extracted automatically and assigned in real-time."
+         >
+           <AnimatedActionItems />
+         </BentoCard>
+
+         <BentoCard 
+           className="md:col-span-2 min-h-[380px]" 
+           delay={0.3}
+           title="Clarity from chaos." 
+           description="We extract decisions, dates, and action items the second your meeting ends."
+         >
+           <AnimatedSummary />
+         </BentoCard>
+       </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   WORKFLOW COMPONENT (Horizontal Tree)
+───────────────────────────────────────────── */
+function AnimatedWorkflow() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) return <div className="h-[340px] w-full max-w-[600px] mx-auto" />;
+
+  return (
+    <div className="relative w-full max-w-[600px] mx-auto h-[340px]">
+      {/* SVG Connections */}
+      <svg viewBox="0 0 600 340" className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+        {/* Top Branch (to Calendar) */}
+        <motion.path
+          d="M 120 170 C 300 170, 300 70, 480 70"
+          stroke="var(--border)"
+          strokeWidth="2"
+          strokeDasharray="4 4"
+          fill="none"
+          initial={{ pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 1.5, ease: "easeInOut" }}
+        />
+        {/* Moving dot on top branch */}
+        <motion.circle
+          r="3"
+          fill="var(--foreground)"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: "linear", delay: 0.5 }}
+        >
+          <animateMotion 
+            dur="2.5s" 
+            repeatCount="indefinite" 
+            path="M 120 170 C 300 170, 300 70, 480 70" 
+            begin="0.5s"
+          />
+        </motion.circle>
+
+        {/* Bottom Branch (to Notion) */}
+        <motion.path
+          d="M 120 170 C 300 170, 300 270, 480 270"
+          stroke="var(--border)"
+          strokeWidth="2"
+          strokeDasharray="4 4"
+          fill="none"
+          initial={{ pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 1.5, ease: "easeInOut" }}
+        />
+        {/* Moving dot on bottom branch */}
+        <motion.circle
+          r="3"
+          fill="var(--foreground)"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: "linear", delay: 1.5 }}
+        >
+          <animateMotion 
+            dur="2.5s" 
+            repeatCount="indefinite" 
+            path="M 120 170 C 300 170, 300 270, 480 270"
+            begin="1.5s" 
+          />
+        </motion.circle>
+      </svg>
+
+      {/* Nodes */}
+      
+      {/* Root Node: Meeting Bot (Left) */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+        className="absolute left-[80px] top-[170px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-3 z-10"
+      >
+        <div className="relative h-20 w-20 rounded-[1.5rem] bg-foreground shadow-2xl flex items-center justify-center overflow-hidden">
+          <motion.div 
+            className="absolute inset-0 bg-background/20 rounded-[1.5rem]"
+            animate={{ opacity: [0.2, 0.5, 0.2] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <Bot className="h-10 w-10 text-background relative z-10" />
+        </div>
+        <span className="text-[13px] font-semibold text-foreground absolute -bottom-8 whitespace-nowrap">Meeting Bot</span>
+      </motion.div>
+
+      {/* Leaf Node 1: Calendar (Right Top) */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5, delay: 0.6 }}
+        className="absolute left-[520px] top-[70px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-3 z-10"
+      >
+        <div className="h-16 w-16 rounded-2xl bg-card border border-border shadow-lg flex items-center justify-center">
+          <Calendar className="h-7 w-7 text-foreground" />
+        </div>
+        <span className="text-[12px] font-medium text-muted-foreground absolute -bottom-6 whitespace-nowrap">Google Calendar</span>
+      </motion.div>
+
+      {/* Leaf Node 2: Notion (Right Bottom) */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5, delay: 1 }}
+        className="absolute left-[520px] top-[270px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-3 z-10"
+      >
+        <div className="h-16 w-16 rounded-2xl bg-card border border-border shadow-lg flex items-center justify-center">
+          <FileText className="h-7 w-7 text-foreground" />
+        </div>
+        <span className="text-[12px] font-medium text-muted-foreground absolute -bottom-6 whitespace-nowrap">Notion</span>
+      </motion.div>
+    </div>
+  );
+}
+
+
+/* ─────────────────────────────────────────────
+   INTEGRATIONS & CTA
+───────────────────────────────────────────── */
+function EndSection() {
+  return (
+    <section className="w-full py-32 border-t border-border bg-background overflow-hidden">
+      <div className="max-w-[1000px] mx-auto px-6 text-center">
+        <FadeIn>
+          <h2 className="text-3xl md:text-4xl lg:text-[2.5rem] font-semibold tracking-tighter text-foreground mb-6 leading-[1.1]">
+            Fits right in.
+          </h2>
+        </FadeIn>
+        <FadeIn delay={0.1}>
+          <p className="text-lg md:text-xl text-muted-foreground font-normal tracking-widest mb-16 max-w-[400px] mx-auto">
+            Connects seamlessly with Google Calendar and Notion.
+          </p>
+        </FadeIn>
+        
+        {/* Animated Workflow Component */}
+        <FadeIn delay={0.2} className="mb-32">
+          <AnimatedWorkflow />
+        </FadeIn>
+
+        {/* Minimal CTA */}
+        <FadeIn delay={0.3}>
+          <h2 className="text-3xl md:text-4xl lg:text-[2.5rem] font-semibold tracking-tighter text-foreground mb-10 leading-[1.1]">
+            Start meeting better.
+          </h2>
+        </FadeIn>
+        <FadeIn delay={0.4}>
+          <Link
+            href="/sign-up"
+            className="inline-flex items-center justify-center h-12 px-8 rounded-md text-[15px] font-medium bg-foreground text-background transition-opacity hover:opacity-90"
+          >
+            Get started for free
+          </Link>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
 
 export function Features() {
   return (
-    <>
-      {/* ── Stats bar ── */}
-      <section className="w-full max-w-[960px] mx-auto mt-28">
-        <div className="grid grid-cols-2 md:grid-cols-4 rounded-2xl border border-border bg-card overflow-hidden divide-x divide-border">
-          {stats.map((s) => (
-            <div key={s.label} className="flex flex-col items-center justify-center py-8 gap-1 text-center px-4">
-              <p className="text-3xl md:text-4xl font-extrabold tabular-nums tracking-tight text-foreground">{s.value}</p>
-              <p className="text-[11px] font-medium text-muted-foreground/50 uppercase tracking-[0.06em]">{s.label}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Features grid ── */}
-      <section id="features" className="w-full max-w-[1200px] mx-auto mt-32 px-6 lg:px-0">
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.08em] mb-5">
-            <Zap className="h-3 w-3 text-primary" />
-            Feature set
-          </div>
-          <h2 className="text-3xl md:text-[2.75rem] font-extrabold tracking-[-0.03em] text-foreground mb-4 leading-[1.15]">
-            Everything your team needs
-          </h2>
-          <p className="text-[1.05rem] text-muted-foreground/60 max-w-[480px] mx-auto leading-relaxed">
-            From live transcription to AI summaries and integrations — all in one platform.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-          {features.map((f, i) => {
-            const Icon = f.icon;
-            const colors = accentMap[f.accent];
-            // Bento layout: row1 = 7+5, row2 = 4+4+4, row3 = 5+7
-            const spanClass =
-              i === 0 ? "md:col-span-7" :
-              i === 1 ? "md:col-span-5" :
-              i === 2 ? "md:col-span-4" :
-              i === 3 ? "md:col-span-4" :
-              i === 4 ? "md:col-span-4" :
-              "md:col-span-12";
-            // Last card spans full width — make it horizontal
-            const isWide = i === 5;
-            return (
-              <div
-                key={f.title}
-                className={`group relative overflow-hidden rounded-2xl border ${colors.border} bg-card transition-all duration-300 hover:bg-muted/30 hover:shadow-[0_8px_40px_-12px] ${colors.glow} hover:-translate-y-0.5 ${spanClass} ${isWide ? "p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-5" : "p-6"}`}
-              >
-                <div className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${colors.bg} ${isWide ? "" : "mb-5"} transition-transform duration-300 group-hover:scale-105`}>
-                  <Icon className={`h-5 w-5 ${colors.icon}`} />
-                </div>
-                <div>
-                  <h3 className="text-[15px] font-semibold text-foreground mb-1.5 tracking-[-0.01em]">{f.title}</h3>
-                  <p className={`text-[13px] text-muted-foreground/60 leading-[1.65] ${isWide ? "max-w-md" : ""}`}>{f.desc}</p>
-                </div>
-
-                {/* Corner glow on hover */}
-                <div className={`pointer-events-none absolute -right-8 -bottom-8 h-28 w-28 rounded-full ${colors.bg} blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ── How it works ── */}
-      <section id="how-it-works" className="w-full max-w-[1200px] mx-auto mt-36 px-6 lg:px-0">
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.08em] mb-5">
-            <CheckSquare className="h-3 w-3 text-primary" />
-            How it works
-          </div>
-          <h2 className="text-3xl md:text-[2.75rem] font-extrabold tracking-[-0.03em] text-foreground mb-4 leading-[1.15]">
-            From meeting to insight in minutes
-          </h2>
-          <p className="text-[1.05rem] text-muted-foreground/60 max-w-[480px] mx-auto leading-relaxed">
-            No configuration. Just start talking — Meeting Bot handles the rest.
-          </p>
-        </div>
-
-        <div className="relative grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* Connector line — desktop only */}
-          <div className="pointer-events-none absolute top-[22px] left-[12%] right-[12%] hidden lg:block">
-            <div className="h-px w-full bg-linear-to-r from-transparent via-white/8 to-transparent" />
-          </div>
-
-          {steps.map((step) => (
-              <div key={step.number} className="group relative flex flex-col gap-4">
-                {/* Step number */}
-                <div className="relative z-10 flex h-11 w-11 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-[12px] font-extrabold text-primary tracking-wide transition-all duration-300 group-hover:border-primary/40 group-hover:bg-primary/[0.14] group-hover:shadow-[0_0_16px_-4px] group-hover:shadow-primary/20">
-                  {step.number}
-                </div>
-                <div>
-                  <h3 className="font-semibold text-foreground mb-1.5 text-[15px] tracking-[-0.01em]">{step.title}</h3>
-                  <p className="text-[13px] text-muted-foreground/55 leading-[1.65]">{step.desc}</p>
-                </div>
-              </div>
-            ))}
-        </div>
-      </section>
-
-      {/* ── Integrations ── */}
-      <section id="integrations" className="w-full max-w-[1200px] mx-auto mt-36 px-6 lg:px-0">
-        <div className="overflow-hidden rounded-2xl border border-border bg-card p-8 md:p-12">
-          <div className="grid md:grid-cols-2 gap-10 items-center">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.08em] mb-5">
-                <Radio className="h-3 w-3 text-primary" />
-                Integrations
-              </div>
-              <h2 className="text-2xl md:text-3xl font-extrabold tracking-[-0.03em] text-foreground mb-4 leading-[1.2]">
-                Works with your existing tools
-              </h2>
-              <p className="text-muted-foreground/55 leading-relaxed mb-7 text-[15px]">
-                Connect Google Calendar to auto-schedule meetings, and Notion to export summaries, transcripts, and action items.
-              </p>
-              <div className="flex flex-col gap-2.5">
-                {[
-                  { icon: CalendarDays, name: "Google Calendar", desc: "Auto-sync meeting events and attendees" },
-                  { icon: FileText, name: "Notion", desc: "Export summaries, decisions, and recordings" },
-                ].map((i) => (
-                  <div key={i.name} className="group flex items-center gap-4 rounded-xl border border-border bg-muted/30 px-4 py-3.5 transition-colors duration-200 hover:bg-muted/60">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/8 ring-1 ring-primary/15 transition-all duration-300 group-hover:ring-primary/30">
-                      <i.icon className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] font-semibold text-foreground">{i.name}</p>
-                      <p className="text-[12px] text-muted-foreground/50">{i.desc}</p>
-                    </div>
-                    <div className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/6 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 tracking-wide">
-                      Available
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="relative hidden md:flex items-center justify-center">
-              {/* Decorative integration illustration */}
-              <div className="relative flex flex-col items-center gap-6">
-                <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-primary/15 bg-primary/6 shadow-[0_8px_32px_-8px] shadow-primary/10">
-                  <BrainCircuit className="h-10 w-10 text-primary" />
-                </div>
-                {/* Connector */}
-                <div className="h-6 w-px bg-linear-to-b from-primary/20 to-transparent" />
-                <div className="flex gap-6">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-rose-500/15 bg-rose-500/6 shadow-lg shadow-rose-500/5">
-                    <CalendarDays className="h-7 w-7 text-rose-400" />
-                  </div>
-                  <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-500/15 bg-slate-500/6 shadow-lg shadow-slate-500/5">
-                    <FileText className="h-7 w-7 text-slate-400" />
-                  </div>
-                </div>
-                <p className="text-[12px] text-muted-foreground/40 text-center max-w-[200px] leading-relaxed">
-                  Meeting Bot sits at the center of your workflow, syncing with your tools automatically.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </>
+    <div className="bg-background relative">
+      <BentoGridSection />
+      <EndSection />
+    </div>
   );
 }

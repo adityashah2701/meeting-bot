@@ -1,63 +1,128 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Bot } from "lucide-react";
+import { Bot, Menu, X, Sun, Moon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useTheme } from "next-themes";
+
+const navLinks = [
+  { label: "Features", href: "#features" },
+  { label: "How it works", href: "#how-it-works" },
+  { label: "Integrations", href: "#integrations" },
+];
 
 export function Navbar() {
+  const [scrolled, setScrolled] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { theme, setTheme } = useTheme();
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
-    <nav className="fixed top-0 w-full z-50">
-      {/* Subtle top highlight line */}
-      <div className="h-px bg-linear-to-r from-transparent via-primary/40 to-transparent" />
-      <div className="border-b border-border/60 bg-background/80 backdrop-blur-2xl backdrop-saturate-150">
+    <>
+      {/* ── Desktop navbar ── */}
+      <nav
+        className={cn(
+          "fixed top-0 w-full z-50 transition-all duration-300",
+          scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent border-b border-transparent"
+        )}
+      >
         <div className="mx-auto max-w-[1200px] px-6 h-[64px] flex items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 transition-all duration-300 group-hover:ring-primary/40 group-hover:shadow-[0_0_12px_-2px] group-hover:shadow-primary/20">
-              <Bot className="h-[18px] w-[18px] text-primary transition-transform duration-300 group-hover:scale-110" />
+          <Link href="/" className="flex items-center gap-2 group shrink-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background">
+              <Bot className="h-4 w-4" />
             </div>
-            <span className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
+            <span className="text-[14px] font-semibold tracking-tight text-foreground">
               Meeting Bot
             </span>
           </Link>
 
-          {/* Nav links */}
-          {/* <div className="hidden md:flex items-center gap-1">
-            {[
-              { label: "Features", href: "#features" },
-              { label: "How it works", href: "#how-it-works" },
-              { label: "Integrations", href: "#integrations" },
-            ].map((link) => (
+          {/* Center nav links */}
+          <div className="hidden md:flex items-center gap-6">
+            {navLinks.map((link) => (
               <Link
                 key={link.label}
                 href={link.href}
-                className="relative px-3.5 py-2 text-[13px] font-medium text-muted-foreground/80 transition-colors duration-200 hover:text-foreground group"
+                className="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
                 {link.label}
-                <span className="absolute inset-x-3.5 -bottom-px h-px bg-primary scale-x-0 transition-transform duration-300 group-hover:scale-x-100" />
               </Link>
             ))}
-          </div> */}
+          </div>
 
-          {/* CTA */}
-          <div className="flex items-center gap-4">
+          {/* Right CTAs */}
+          <div className="hidden md:flex items-center gap-3">
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="relative inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+              <span className="sr-only">Toggle theme</span>
+            </button>
             <Link
               href="/sign-in"
-              className="hidden sm:inline-flex text-[13px] font-medium text-muted-foreground/70 transition-colors duration-200 hover:text-foreground"
+              className="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
-              Sign in
+              Log in
             </Link>
-            <Button
-              asChild
-              size="sm"
-              className="h-8 px-4 text-[13px] font-semibold rounded-lg bg-primary text-primary-foreground shadow-[0_1px_2px_0_rgb(0_0_0/0.3),inset_0_1px_0_0_rgb(255_255_255/0.06)] hover:shadow-[0_2px_8px_-2px] hover:shadow-primary/30 transition-all duration-200 hover:-translate-y-px"
+            <Link
+              href="/sign-up"
+              className="inline-flex items-center justify-center h-8 px-4 rounded-md text-[13px] font-medium bg-foreground text-background transition-opacity hover:opacity-90"
             >
-              <Link href="/sign-up">Get started free</Link>
-            </Button>
+              Sign up
+            </Link>
+          </div>
+
+          {/* Mobile hamburger */}
+          <button
+            className="md:hidden p-2 -mr-2 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => setMobileOpen(!mobileOpen)}
+            aria-label="Toggle menu"
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
+      </nav>
+
+      {/* ── Mobile menu ── */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 pt-[64px] bg-background">
+          <div className="px-6 py-6 flex flex-col gap-4">
+            {navLinks.map((link) => (
+              <Link
+                key={link.label}
+                href={link.href}
+                className="text-[16px] font-medium text-foreground/80 hover:text-foreground transition-colors"
+                onClick={() => setMobileOpen(false)}
+              >
+                {link.label}
+              </Link>
+            ))}
+            <div className="h-px w-full bg-border my-2" />
+            <Link
+              href="/sign-in"
+              className="text-[16px] font-medium text-foreground/80 hover:text-foreground"
+              onClick={() => setMobileOpen(false)}
+            >
+              Log in
+            </Link>
+            <Link
+              href="/sign-up"
+              className="mt-2 inline-flex items-center justify-center h-11 rounded-md bg-foreground text-background text-[15px] font-medium transition-opacity hover:opacity-90"
+              onClick={() => setMobileOpen(false)}
+            >
+              Sign up
+            </Link>
           </div>
         </div>
-      </div>
-    </nav>
+      )}
+    </>
   );
 }
