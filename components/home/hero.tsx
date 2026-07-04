@@ -8,8 +8,8 @@ export function Hero() {
   return (
     <section className="relative w-full pt-12 pb-16 px-6 lg:px-8 bg-background overflow-hidden">
       {/* Subtle top glow */}
-      <div className="absolute top-0 left-0 w-full h-[800px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-muted/40 via-background to-background -z-10 pointer-events-none" />
-      
+      <div className="absolute top-0 left-0 w-full h-[800px] bg-[radial-gradient(ellipse_at_top,var(--tw-gradient-stops))] from-muted/40 via-background to-background -z-10 pointer-events-none" />
+
       <div className="max-w-[1200px] mx-auto flex flex-col items-start w-full relative z-10">
         {/* Typographic Hero */}
         <FadeIn className="text-left mb-8 md:mb-5 w-full">
